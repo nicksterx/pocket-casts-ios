@@ -182,9 +182,8 @@ class SettingsViewController: PCViewController, UITableViewDataSource, UITableVi
         case .about:
             Analytics.track(.settingsAboutShown)
 
-            let aboutView = AboutView(dismissAction: { [weak self] in
-                self?.navigationController?.dismiss(animated: true, completion: nil)
-            }).environmentObject(Theme.sharedTheme)
+            let aboutView = AboutView()
+                .environmentObject(Theme.shared)
             let hostingController = PCHostingController(rootView: aboutView)
 
             navigationController?.present(hostingController, animated: true, completion: nil)
@@ -200,6 +199,7 @@ class SettingsViewController: PCViewController, UITableViewDataSource, UITableVi
             navigationController?.pushViewController(PrivacySettingsViewController(), animated: true)
         case .developer:
             let hostingController = UIHostingController(rootView: DeveloperMenu().setupDefaultEnvironment())
+            hostingController.title = "Developer"
             navigationController?.pushViewController(hostingController, animated: true)
         case .beta:
             let hostingController = UIHostingController(rootView: BetaMenu().setupDefaultEnvironment())

@@ -24,6 +24,10 @@ class DescriptiveActionView: UIView {
         self.iconTintStyle = iconTintStyle
         self.onLinkTap = onLinkTap
         super.init(frame: frame)
+
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: DescriptiveActionView, _) in
+            view.updateSize()
+        }
     }
 
     @available(*, unavailable)
@@ -155,8 +159,10 @@ class DescriptiveActionView: UIView {
         config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 24, bottom: 12, trailing: 24)
 
         let actionButton = UIButton(configuration: config, primaryAction: UIAction(title: action.label, handler: { [weak self] _ in
-            action.action()
+            // Dismiss the sheet before running the action so an action that
+            // presents another screen doesn't hit "already presenting".
             self?.delegate?.animateOut(optionChosen: true)
+            action.action()
         }))
         actionButton.configurationUpdateHandler = { button in
             var config = button.configuration
@@ -167,34 +173,6 @@ class DescriptiveActionView: UIView {
             button.configuration = config
         }
         return actionButton
-    }
-
-    private func makeShiftyButton(for action: OptionAction) -> UIView {
-        let actionButton = ShiftyRoundButton()
-        actionButton.fontSize = 18
-        actionButton.buttonTitle = action.label
-        actionButton.isAccessibilityElement = true
-        actionButton.accessibilityLabel = action.label
-        actionButton.accessibilityTraits = [.button]
-        let actionColor = action.destructive ? AppTheme.destructiveTextColor() : ThemeColor.primaryIcon01(for: themeOverride)
-        actionButton.textColor = action.outline ? actionColor : ThemeColor.primaryInteractive02(for: themeOverride)
-        actionButton.fillColor = actionColor
-        actionButton.strokeColor = actionColor
-        actionButton.isOn = !action.outline
-        actionButton.setup()
-        actionButton.buttonTapped = { [weak self] in
-            action.action()
-            self?.delegate?.animateOut(optionChosen: true)
-        }
-        return actionButton
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-
-        if traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory {
-            updateSize()
-        }
     }
 
     private func updateSize() {

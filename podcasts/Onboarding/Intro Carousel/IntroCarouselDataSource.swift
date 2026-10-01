@@ -1,4 +1,5 @@
 import SwiftUI
+import EndOfYear
 
 class IntroCarouselDataSource: StoriesDataSource {
     private let items: [CarouselItem]
@@ -13,10 +14,6 @@ class IntroCarouselDataSource: StoriesDataSource {
 
     func story(for index: Int) -> any StoryView {
         IntroCarouselStory(item: items[index], theme: theme)
-    }
-
-    func storyView(for index: Int) -> AnyView {
-        AnyView(IntroCarouselStory(item: items[index], theme: theme))
     }
 
     func shareableStory(for index: Int) -> (any ShareableStory)? {

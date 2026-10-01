@@ -82,8 +82,7 @@ struct ThemePreviewView: View {
 struct ThemeSelectorView_Previews: PreviewProvider {
     static var previews: some View {
         ThemeSelectorView(title: L10n.appearanceThemeSelect, onThemeSelected: { _ in
-
         }, dismissAction: {}, selectedTheme: .dark)
-            .environmentObject(Theme.sharedTheme)
+            .environmentObject(Theme.shared)
     }
 }

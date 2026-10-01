@@ -1,23 +1,42 @@
+import Accelerate
 import AVFoundation
 import CoreAudioTypes
 import Foundation
 import PocketCastsDataModel
 import PocketCastsUtils
+import UIKit
+#if !os(watchOS)
+    import VoiceBoostN
+#endif
 
 class DefaultPlayer: PlaybackProtocol, Hashable {
     private var audioMix: AVAudioMix?
     private var assetTrack: AVAssetTrack?
 
-    private var player: AVPlayer?
+    private(set) var player: AVPlayer?
 
     private var requiredPlaybackRate: Double = 0
     private var shouldKeepPlaying = false
     private var volumeBoostEnabled = false
+    private var isHandlingRateChange = false
 
     private var lastBackgroundedDate: Date?
 
     /// Internal flag that keeps track of whether we're waiting for the initial playback to begin
     private var isWaitingForInitialPlayback = false
+
+    private var isPlayingLocalFile = false
+
+    /// Whether the current episode is being streamed over HLS. HLS is streamed directly (never cached),
+    /// so it needs extra buffering headroom and a capped playback rate to avoid stalling.
+    private var isStreamingHLS = false
+
+    /// Larger forward buffer for HLS so higher playback rates don't starve the pipeline and stall.
+    private static let hlsForwardBufferDuration: TimeInterval = 60
+
+    /// HLS streams can't reliably sustain playback above this rate, and the time-domain pitch
+    /// algorithm degrades past it, so the applied rate is capped here for HLS.
+    private static let hlsMaxPlaybackRate: Double = 2.0
 
     // Keep track of the previous playback and waiting state
     private var previousReasonForWaiting: AVPlayer.WaitingReason?
@@ -28,6 +47,7 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
     private var playerStatusObserver: NSKeyValueObservation?
     private var playerItemStatusObserver: NSKeyValueObservation?
     private var timeControlStatusObserver: NSKeyValueObservation?
+    private var presentationSizeObserver: NSKeyValueObservation?
 
     private var playToEndObserver: NSObjectProtocol?
     private var playFailedObserver: NSObjectProtocol?
@@ -36,30 +56,48 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
     private var episodeUuid: String?
     private var podcastUuid: String?
 
-    #if !os(watchOS)
-        private lazy var episodeArtwork: EpisodeArtwork = {
-            EpisodeArtwork()
-        }()
+#if !os(watchOS) && !APPCLIP && !os(tvOS)
+    private var cellularTracker: StreamingCellularTracker?
+#endif
 
-        private var peakLimiter: AudioUnit?
-        private var highPassFilter: AudioUnit?
-        private var sampleCount: Float64 = 0
-        private var backgroundTaskId: UIBackgroundTaskIdentifier
-        private var voiceBoostNState: OpaquePointer?
-        private var cachedSampleRate: Double = 0
-    #endif
+#if !os(watchOS)
+    @MainActor
+    private lazy var episodeArtwork = EpisodeArtwork()
+
+    private var backgroundTaskId: UIBackgroundTaskIdentifier
+
+#endif
+
+    /// RMS audio level (0...1) computed from the audio processing tap each buffer.
+    /// Written from the real-time audio thread, read from the main thread.
+    ///
+    /// This is a benign data race: on ARM64 an aligned 32-bit store/load is
+    /// atomic at the hardware level, so the main thread will always read a
+    /// coherent Float value (never a torn write). The worst case is reading a
+    /// slightly stale sample, which is invisible for a visual-only meter.
+    /// A lock or `os_unfair_lock` is avoided here because this runs on the
+    /// real-time audio thread where blocking is not acceptable.
+    private(set) var currentAudioLevel: Float = 0
 
     init() {
-        #if !os(watchOS)
-            backgroundTaskId = .invalid
-            NotificationCenter.default.addObserver(self, selector: #selector(didEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
-        #endif
+#if !os(watchOS)
+        backgroundTaskId = .invalid
+        NotificationCenter.default.addObserver(self, selector: #selector(didEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+#endif
     }
 
     func loadEpisode(_ episode: BaseEpisode) {
         if player != nil {
             cleanupPlayer()
             player = nil
+        }
+        audioMix = nil
+        assetTrack = nil
+
+        if let url = EpisodeManager.url(for: episode) {
+            isPlayingLocalFile = url.isFileURL
+        } else {
+            isPlayingLocalFile = false
         }
 
         guard let playerItem = DownloadManager.shared.downloadParallelToStream(of: episode) else {
@@ -69,12 +107,77 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
 
         isWaitingForInitialPlayback = true
 
+        isStreamingHLS = EpisodeManager.willPlayViaHLS(episode)
+
+        // Set the pitch algorithm once here rather than re-applying it on every rate change. For HLS,
+        // give the pipeline more buffered audio so higher playback rates don't starve it and stall.
+        playerItem.audioTimePitchAlgorithm = .timeDomain
+        if isStreamingHLS {
+            playerItem.preferredForwardBufferDuration = Self.hlsForwardBufferDuration
+        }
+
         player = AVPlayer(playerItem: playerItem)
 
         episodeUuid = episode.uuid
         podcastUuid = episode.parentIdentifier()
 
+        // Start cellular tracking for remote streaming
+        // MediaExporterResourceLoaderDelegate handles its own tracking for cache+stream,
+        // but for direct AVPlayer streaming we use StreamingCellularTracker
+        #if !os(watchOS) && !APPCLIP && !os(tvOS)
+        if FeatureFlag.trackNetworkDataUsage.enabled,
+           let urlAsset = playerItem.asset as? AVURLAsset,
+           !urlAsset.url.isFileURL,
+           !(urlAsset.url.scheme?.hasPrefix(MediaExporterResourceLoaderDelegate.schemePrefix) ?? false) {
+            cellularTracker = StreamingCellularTracker()
+            cellularTracker?.startTracking(
+                playerItem: playerItem,
+                episodeUuid: episode.uuid,
+                podcastUuid: episode.parentIdentifier()
+            )
+        }
+        #endif
+
         configurePlayer(videoPodcast: episode.videoPodcast())
+
+        disableSubtitles(for: playerItem)
+
+        detectVideoTracksIfNeeded(for: episode, playerItem: playerItem)
+    }
+
+    /// We don't offer a subtitle/caption UI, but AVPlayer will otherwise turn subtitles on by default
+    /// when a stream has a `DEFAULT=YES` legible rendition or when the system "Closed Captions + SDH"
+    /// accessibility setting is enabled. Prevent automatic selection and deselect any legible track.
+    private func disableSubtitles(for playerItem: AVPlayerItem) {
+        player?.appliesMediaSelectionCriteriaAutomatically = false
+
+        Task { @MainActor in
+            if let group = try? await playerItem.asset.loadMediaSelectionGroup(for: .legible) {
+                playerItem.select(nil, in: group)
+            }
+        }
+    }
+
+    /// An HLS stream can carry video that isn't reflected in the episode's file type. HLS doesn't
+    /// expose video via the asset's tracks, and `presentationSize` is only `0x0` until the first
+    /// video frame is decoded, so we observe it and promote playback to video once it reports a size.
+    private func detectVideoTracksIfNeeded(for episode: BaseEpisode, playerItem: AVPlayerItem) {
+        guard isStreamingHLS, !episode.videoPodcast() else { return }
+
+        let episodeUuid = episode.uuid
+        presentationSizeObserver = playerItem.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
+            let size = item.presentationSize
+            guard size.width > 0, size.height > 0 else { return }
+
+            DispatchQueue.main.async {
+                guard let self, self.presentationSizeObserver != nil else { return }
+                self.presentationSizeObserver = nil
+#if !os(watchOS)
+                self.player?.allowsExternalPlayback = true
+#endif
+                PlaybackManager.shared.handleVideoTracksDetected(forEpisode: episodeUuid)
+            }
+        }
     }
 
     func isReadyToPlay() -> Bool {
@@ -86,7 +189,7 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
     }
 
     func buffering() -> Bool {
-        guard let player = player else { return false }
+        guard let player else { return false }
 
         if let item = player.currentItem {
             return item.isPlaybackBufferEmpty || !item.isPlaybackLikelyToKeepUp
@@ -182,36 +285,25 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
         }
         cleanupPlayer()
 
+        #if !os(watchOS) && !APPCLIP && !os(tvOS)
+        cellularTracker?.stopTracking()
+        cellularTracker = nil
+        #endif
+
         audioMix = nil
         assetTrack = nil
         player = nil
     }
 
     func effectsDidChange() {
-        let effects = PlaybackManager.shared.effects()
+        let effects = PlaybackManager.shared.effects
 
         setPlaybackRate(effects.playbackSpeed)
         volumeBoostEnabled = effects.volumeBoost
     }
 
-    func supportsSilenceRemoval() -> Bool {
-        false
-    }
-
-    func supportsVolumeBoost() -> Bool {
-        true
-    }
-
     func supportsGoogleCast() -> Bool {
         false
-    }
-
-    func supportsStreaming() -> Bool {
-        true
-    }
-
-    func supportsAirplay2() -> Bool {
-        true
     }
 
     func shouldBePlaying() -> Bool {
@@ -236,35 +328,54 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
         lastBackgroundedDate = Date()
     }
 
-    private func playerStatusDidChange() {
-        if player?.currentItem?.status == .failed {
+    private func checkIfPlayerFailed() -> Bool {
+        guard let player, player.currentItem?.status == .failed  || player.status == .failed else {
+            return false
+        }
+        let playerErrorMessage =  (player.error as? NSError)?.debugDescription ?? ""
+        let playerItemErrorMessage = (player.currentItem?.error as? NSError)?.debugDescription ?? ""
+        FileLog.shared.addMessage("[DefaultPlayer] Playback did fail with error: \(playerErrorMessage) | \(playerItemErrorMessage)")
 
-            if FeatureFlag.whenPlayingOnlyUpdateEpisodeIfPlaybackFails.enabled,
-               (player?.currentItem?.error as? NSError)?.domain == NSURLErrorDomain,
-                let episodeUuid {
-                PlaybackManager.shared.urlFailedToLoad(for: episodeUuid)
-                return
+        // Give priority to player item error
+        let playerError: Error? = (player.currentItem?.error ?? player.error)
+        let playerNSError = playerError as? NSError
+        let logMessage = "AVPlayerItemStatusFailed on currentItem: \(playerErrorMessage) - \(playerItemErrorMessage)"
+
+        if let playerNSError, playerNSError.isOutOfStorage {
+            PlaybackManager.shared.playbackDidFail(error: .notEnoughStorage(logMessage: logMessage))
+            return true
+        }
+
+        if let playerNSError, playerNSError.domain == NSURLErrorDomain, playerNSError.code != NSURLErrorNotConnectedToInternet,
+           let episodeUuid {
+            if PlaybackManager.shared.retryUrlLoad(for: episodeUuid) {
+                return false
             }
+        }
+        var error: PlaybackManager.PlaybackError = .playbackError(logMessage: logMessage, isLocalFile: isPlayingLocalFile)
+        if let playerNSError,
+           playerNSError.domain == NSURLErrorDomain {
+            if PlaybackManager.PlaybackError.knownURLErrors.contains(playerNSError.code) {
+                error = .episodeNotAvailable(errorCode: playerNSError.code, logMessage: logMessage)
+            } else if playerNSError.code == NSURLErrorNotConnectedToInternet {
+                error = .internetConnection(logMessage: logMessage)
+            } else {
+                error = .episodeNotAvailable(errorCode: playerNSError.code, logMessage: logMessage)
+            }
+        }
+        PlaybackManager.shared.playbackDidFail(error: error)
 
-            PlaybackManager.shared.playbackDidFail(logMessage: "AVPlayerItemStatusFailed on currentItem", userMessage: nil)
+        return true
+    }
 
+    private func playerStatusDidChange() {
+        guard !checkIfPlayerFailed() else {
             return
         }
 
-        if assetTrack == nil, player?.currentItem?.status == .readyToPlay, let tracks = player?.currentItem?.asset.tracks {
+        if isWaitingForInitialPlayback, let playerItem = player?.currentItem, playerItem.status == .readyToPlay {
             loadEmbeddedImage()
-
-            for track in tracks {
-                if track.mediaType == AVMediaType.audio {
-                    assetTrack = track
-                    break
-                }
-            }
-
-            #if !os(watchOS)
-                createAudioMix()
-                player?.currentItem?.audioMix = audioMix
-            #endif
+            loadAudioTrack(for: playerItem)
 
             isWaitingForInitialPlayback = false
         }
@@ -272,18 +383,67 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
         PlaybackManager.shared.playerDidChangeNowPlayingInfo()
     }
 
+    private func loadAudioTrack(for playerItem: AVPlayerItem) {
+        switch playerItem.asset.status(of: .tracks) {
+        case .loaded(let tracks):
+            assetTrack = tracks.first { $0.mediaType == .audio }
+        case .failed(let error):
+            FileLog.shared.addMessage("[DefaultPlayer] Failed to load asset tracks: \(error)")
+        default:
+            FileLog.shared.addMessage("[DefaultPlayer] Asset tracks were not loaded when the item became ready to play")
+        }
+
+        #if !os(watchOS)
+            if assetTrack != nil {
+                createAudioMix()
+                playerItem.audioMix = audioMix
+            }
+        #endif
+    }
+
     // MARK: - Audio Mix
 #if !os(watchOS)
     private class AudioProcessingTapProxy {
         weak var input: DefaultPlayer?
+
+        var peakLimiter: AudioUnit?
+        var highPassFilter: AudioUnit?
+        var sampleCount: Float64 = 0
+        var voiceBoostNState: OpaquePointer?
+        var cachedSampleRate: Double = 0
 
         init(input: DefaultPlayer) {
             self.input = input
         }
 
         deinit {
+            disposeResources()
             FileLog.shared.console("[AudioProcessingTapProxy] Deinit proxy")
         }
+
+        func disposeResources() {
+            if let voiceBoostNState {
+                VBN_Destroy(voiceBoostNState)
+                self.voiceBoostNState = nil
+                FileLog.shared.addMessage("[DefaultPlayer] VoiceBoostN state destroyed")
+            }
+
+            if let peakLimiter {
+                AudioUnitUninitialize(peakLimiter)
+                AudioComponentInstanceDispose(peakLimiter)
+                self.peakLimiter = nil
+            }
+
+            if let highPassFilter {
+                AudioUnitUninitialize(highPassFilter)
+                AudioComponentInstanceDispose(highPassFilter)
+                self.highPassFilter = nil
+            }
+        }
+    }
+
+    private static func tapProxy(for tap: MTAudioProcessingTap) -> AudioProcessingTapProxy {
+        Unmanaged<AudioProcessingTapProxy>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
     }
 
     private static func unretainedDefaultPlayer(for tap: MTAudioProcessingTap) -> DefaultPlayer? {
@@ -291,15 +451,9 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
     }
 
     private static func unretainedDefaultPlayer(for pointer: UnsafeMutableRawPointer) -> DefaultPlayer? {
-        if FeatureFlag.useDefaultPlayerTapCookie.enabled {
-            let cookie = Unmanaged<AudioProcessingTapProxy>.fromOpaque(pointer).takeUnretainedValue()
-            guard let player = cookie.input else { return nil }
-            return player
-        } else if FeatureFlag.defaultPlayerFilterCallbackFix.enabled {
-            return Unmanaged<DefaultPlayer>.fromOpaque(pointer).takeUnretainedValue()
-        } else {
-            return unsafeBitCast(pointer, to: DefaultPlayer.self)
-        }
+        let cookie = Unmanaged<AudioProcessingTapProxy>.fromOpaque(pointer).takeUnretainedValue()
+        guard let player = cookie.input else { return nil }
+        return player
     }
 
         private func createAudioMix() {
@@ -308,11 +462,8 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
             let mutableMix = AVMutableAudioMix()
             let audioMixInputParameters = AVMutableAudioMixInputParameters(track: assetTrack)
 
-            var clientInfo = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
-            if FeatureFlag.useDefaultPlayerTapCookie.enabled {
-                let tapCookie = AudioProcessingTapProxy(input: self)
-                clientInfo = UnsafeMutableRawPointer(Unmanaged.passRetained(tapCookie).toOpaque())
-            }
+            let tapCookie = AudioProcessingTapProxy(input: self)
+            let clientInfo = UnsafeMutableRawPointer(Unmanaged.passRetained(tapCookie).toOpaque())
 
             var callbacks = MTAudioProcessingTapCallbacks(
                 version: kMTAudioProcessingTapCallbacksVersion_0,
@@ -350,21 +501,17 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
                 return
             }
 
-            referenceToSelf.peakLimiter = nil
-            referenceToSelf.highPassFilter = nil
-            referenceToSelf.sampleCount = 0
-            referenceToSelf.voiceBoostNState = nil
+            referenceToSelf.currentAudioLevel = 0
         }
 
         let tapFinalize: MTAudioProcessingTapFinalizeCallback = { tap in
-            if FeatureFlag.useDefaultPlayerTapCookie.enabled {
-                FileLog.shared.console("[AudioProcessingTapProxy] Finalize tap: \(tap)\n")
-                Unmanaged<AudioProcessingTapProxy>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).release()
-            }
+            FileLog.shared.console("[AudioProcessingTapProxy] Finalize tap: \(tap)\n")
+            Unmanaged<AudioProcessingTapProxy>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).release()
         }
 
         let tapPrepare: MTAudioProcessingTapPrepareCallback = { tap, maxFrames, processingFormat in
-            guard let referenceToSelf = DefaultPlayer.unretainedDefaultPlayer(for: tap) else {
+            let proxy = DefaultPlayer.tapProxy(for: tap)
+            guard let referenceToSelf = proxy.input else {
                 return
             }
 
@@ -372,76 +519,60 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
                 referenceToSelf.handlePlaybackError("Setup high pass filter failed")
                 return
             }
-            referenceToSelf.highPassFilter = filter
+            proxy.highPassFilter = filter
 
             guard let limiter = referenceToSelf.createPeakLimiter(maxFrames: maxFrames, processingFormat: processingFormat.pointee, tap: tap) else {
                 referenceToSelf.handlePlaybackError("Setup peak limiter failed")
                 return
             }
-            referenceToSelf.peakLimiter = limiter
+            proxy.peakLimiter = limiter
 
             // Store sample rate for dynamic VoiceBoostN creation
-            referenceToSelf.cachedSampleRate = Double(processingFormat.pointee.mSampleRate)
+            proxy.cachedSampleRate = Double(processingFormat.pointee.mSampleRate)
         }
 
         let tapUnprepare: MTAudioProcessingTapUnprepareCallback = { tap in
-            guard let referenceToSelf = DefaultPlayer.unretainedDefaultPlayer(for: tap) else {
-                return
-            }
-
-            if let vbnState = referenceToSelf.voiceBoostNState {
-                VBN_Destroy(vbnState)
-                referenceToSelf.voiceBoostNState = nil
-                FileLog.shared.addMessage("[DefaultPlayer] VoiceBoostN state destroyed")
-            }
-
-            if let peakLimiter = referenceToSelf.peakLimiter {
-                AudioUnitUninitialize(peakLimiter)
-                AudioComponentInstanceDispose(peakLimiter)
-                referenceToSelf.peakLimiter = nil
-            }
-
-            if let highPassFilter = referenceToSelf.highPassFilter {
-                AudioUnitUninitialize(highPassFilter)
-                AudioComponentInstanceDispose(highPassFilter)
-                referenceToSelf.highPassFilter = nil
-            }
+            DefaultPlayer.tapProxy(for: tap).disposeResources()
         }
 
         let tapProcess: MTAudioProcessingTapProcessCallback = { tap, numberFrames, _, bufferListInOut, numberFramesOut, flagsOut in
-            guard let referenceToSelf = DefaultPlayer.unretainedDefaultPlayer(for: tap) else {
+            let proxy = DefaultPlayer.tapProxy(for: tap)
+            guard let referenceToSelf = proxy.input else {
                 return
             }
 
-            let currentSampleCount = referenceToSelf.sampleCount
-            referenceToSelf.sampleCount += Float64(numberFrames)
-            guard referenceToSelf.volumeBoostEnabled, let highPassFilter = referenceToSelf.highPassFilter, referenceToSelf.peakLimiter != nil else {
+            let currentSampleCount = proxy.sampleCount
+            proxy.sampleCount += Float64(numberFrames)
+            guard referenceToSelf.volumeBoostEnabled, let highPassFilter = proxy.highPassFilter, proxy.peakLimiter != nil else {
                 // no effects enabled, so just play normally
                 guard MTAudioProcessingTapGetSourceAudio(tap, numberFrames, bufferListInOut, flagsOut, nil, numberFramesOut) == noErr else {
                     referenceToSelf.handlePlaybackError("MTAudioProcessingTapGetSourceAudio failed")
                     return
                 }
+#if os(tvOS)
+                referenceToSelf.updateAudioLevel(from: bufferListInOut, frameCount: Int(numberFrames))
+#endif
                 return
             }
 
             let shouldUseVoiceBoostN = Settings.isVoiceBoostNEnabled
 
             // Handle dynamic state creation/destruction
-            if shouldUseVoiceBoostN && referenceToSelf.voiceBoostNState == nil {
-                let isInitial = referenceToSelf.sampleCount == Float64(numberFrames) // First buffer
-                referenceToSelf.voiceBoostNState = VBN_Create(referenceToSelf.cachedSampleRate)
+            if shouldUseVoiceBoostN && proxy.voiceBoostNState == nil {
+                let isInitial = proxy.sampleCount == Float64(numberFrames) // First buffer
+                proxy.voiceBoostNState = VBN_Create(proxy.cachedSampleRate)
                 if isInitial {
-                    FileLog.shared.addMessage("[DefaultPlayer] VoiceBoostN enabled - created state at \(referenceToSelf.cachedSampleRate) Hz")
+                    FileLog.shared.addMessage("[DefaultPlayer] VoiceBoostN enabled - created state at \(proxy.cachedSampleRate) Hz")
                 } else {
-                    FileLog.shared.addMessage("[DefaultPlayer] VoiceBoostN enabled mid-playback - created state at \(referenceToSelf.cachedSampleRate) Hz")
+                    FileLog.shared.addMessage("[DefaultPlayer] VoiceBoostN enabled mid-playback - created state at \(proxy.cachedSampleRate) Hz")
                 }
-            } else if !shouldUseVoiceBoostN && referenceToSelf.voiceBoostNState != nil {
-                VBN_Destroy(referenceToSelf.voiceBoostNState)
-                referenceToSelf.voiceBoostNState = nil
+            } else if !shouldUseVoiceBoostN && proxy.voiceBoostNState != nil {
+                VBN_Destroy(proxy.voiceBoostNState)
+                proxy.voiceBoostNState = nil
                 FileLog.shared.addMessage("[DefaultPlayer] VoiceBoostN disabled mid-playback - switching to previous voice boost")
             }
 
-            if let vbnState = referenceToSelf.voiceBoostNState {
+            if let vbnState = proxy.voiceBoostNState {
                 // Use VoiceBoostN processing
                 guard MTAudioProcessingTapGetSourceAudio(tap, numberFrames, bufferListInOut, flagsOut, nil, numberFramesOut) == noErr else {
                     referenceToSelf.handlePlaybackError("MTAudioProcessingTapGetSourceAudio failed")
@@ -473,6 +604,37 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
 
                 numberFramesOut.pointee = numberFrames
             }
+
+            #if os(tvOS)
+            referenceToSelf.updateAudioLevel(from: bufferListInOut, frameCount: Int(numberFrames))
+            #endif
+        }
+
+        // MARK: - Audio Level Metering
+
+        /// Compute RMS audio level from the buffer and store it for UI consumption.
+        /// Called from the real-time audio thread — must be lock-free.
+        ///
+        /// Reads only the first buffer, which is channel 0 in the tap's canonical
+        /// non-interleaved float format. This is sufficient for a visual meter.
+        private func updateAudioLevel(from bufferList: UnsafeMutablePointer<AudioBufferList>, frameCount: Int) {
+            let list = UnsafeMutableAudioBufferListPointer(bufferList)
+            guard let firstBuffer = list.first, let data = firstBuffer.mData else {
+                currentAudioLevel = 0
+                return
+            }
+            // Guard against reading past the buffer's actual data size
+            let availableFrames = min(frameCount, Int(firstBuffer.mDataByteSize) / MemoryLayout<Float>.size)
+            guard availableFrames > 0 else {
+                currentAudioLevel = 0
+                return
+            }
+            let samples = data.assumingMemoryBound(to: Float.self)
+            var rms: Float = 0
+            vDSP_rmsqv(samples, 1, &rms, vDSP_Length(availableFrames))
+            // Clamp to 0...1 and apply light smoothing to avoid jitter
+            let smoothed = currentAudioLevel * 0.3 + min(rms * 3.0, 1.0) * 0.7
+            currentAudioLevel = smoothed
         }
 
         // MARK: - Peak Limter
@@ -497,13 +659,8 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
             guard AudioUnitSetProperty(createdUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &format, UInt32(MemoryLayout<AudioStreamBasicDescription>.stride)) == noErr else { return nil }
 
             // Set audio unit render callback
-            var renderCallback: AURenderCallbackStruct
-            if FeatureFlag.useDefaultPlayerTapCookie.enabled {
-                let inputProcRefCon = Unmanaged<AudioProcessingTapProxy>.fromOpaque(MTAudioProcessingTapGetStorage(tap))
-                renderCallback = AURenderCallbackStruct(inputProc: referenceToSelf.peakLimiterRenderCallback, inputProcRefCon: inputProcRefCon.toOpaque())
-            } else {
-                renderCallback = AURenderCallbackStruct(inputProc: peakLimiterRenderCallback, inputProcRefCon: Unmanaged.passUnretained(self).toOpaque())
-            }
+            let inputProcRefCon = Unmanaged.passUnretained(tap)
+            var renderCallback = AURenderCallbackStruct(inputProc: referenceToSelf.peakLimiterRenderCallback, inputProcRefCon: inputProcRefCon.toOpaque())
 
             guard AudioUnitSetProperty(createdUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &renderCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.stride)) == noErr else { return nil }
 
@@ -525,15 +682,12 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
         }
 
         let peakLimiterRenderCallback: AURenderCallback = { inRefCon, _, _, _, inNumberFrames, ioData -> OSStatus in
-            guard
-                let referenceToSelf = DefaultPlayer.unretainedDefaultPlayer(for: inRefCon),
-                let tap = referenceToSelf.audioMix?.inputParameters.first?.audioTapProcessor,
-                let ioData = ioData
-            else {
+            guard let ioData else {
                 return -1
             }
 
             // The peak limiter is at the end of the chain so just grab the processed audio
+            let tap = Unmanaged<MTAudioProcessingTap>.fromOpaque(inRefCon).takeUnretainedValue()
             return MTAudioProcessingTapGetSourceAudio(tap, CMItemCount(inNumberFrames), ioData, nil, nil, nil)
         }
 
@@ -559,13 +713,8 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
             guard AudioUnitSetProperty(createdUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &format, UInt32(MemoryLayout<AudioStreamBasicDescription>.stride)) == noErr else { return nil }
 
             // Set audio unit render callback
-            var renderCallback: AURenderCallbackStruct
-            if FeatureFlag.useDefaultPlayerTapCookie.enabled {
-                let inputProcRefCon = Unmanaged<AudioProcessingTapProxy>.fromOpaque(MTAudioProcessingTapGetStorage(tap))
-                renderCallback = AURenderCallbackStruct(inputProc: referenceToSelf.highPassFilterRenderCallback, inputProcRefCon: inputProcRefCon.toOpaque())
-            } else {
-                renderCallback = AURenderCallbackStruct(inputProc: highPassFilterRenderCallback, inputProcRefCon: Unmanaged.passUnretained(self).toOpaque())
-            }
+            let inputProcRefCon = Unmanaged<AudioProcessingTapProxy>.fromOpaque(MTAudioProcessingTapGetStorage(tap))
+            var renderCallback = AURenderCallbackStruct(inputProc: referenceToSelf.highPassFilterRenderCallback, inputProcRefCon: inputProcRefCon.toOpaque())
             guard AudioUnitSetProperty(createdUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &renderCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.stride)) == noErr else { return nil }
 
             // Set audio unit maximum frames per slice to max frames
@@ -586,9 +735,8 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
 
         let highPassFilterRenderCallback: AURenderCallback = { inRefCon, _, inTimeStamp, _, inNumberFrames, ioData -> OSStatus in
             guard
-                let referenceToSelf = DefaultPlayer.unretainedDefaultPlayer(for: inRefCon),
-                let peakLimiter = referenceToSelf.peakLimiter,
-                let ioData = ioData
+                let peakLimiter = Unmanaged<AudioProcessingTapProxy>.fromOpaque(inRefCon).takeUnretainedValue().peakLimiter,
+                let ioData
             else {
                 return -1
             }
@@ -610,9 +758,10 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
             requiredPlaybackRate = 1.0
         }
 
-        player?.rate = Float(requiredPlaybackRate)
+        // Cap the applied rate for HLS streams; they can't sustain higher rates without stalling.
+        let effectiveRate = isStreamingHLS ? min(requiredPlaybackRate, Self.hlsMaxPlaybackRate) : requiredPlaybackRate
 
-        player?.currentItem?.audioTimePitchAlgorithm = .timeDomain
+        player?.rate = Float(effectiveRate)
     }
 
     private func jumpToStartingPosition() {
@@ -637,9 +786,9 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
 
             // schedule a timer to cancel the background task as soon as bufferring is done or we don't need to play anymore
             // do this on the main thread because timers require run loops
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
-                    guard let self = self else {
+                    guard let self else {
                         timer.invalidate()
                         return
                     }
@@ -668,7 +817,7 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
         // only reports errors if we're meant to be playing
         if shouldKeepPlaying {
             shouldKeepPlaying = false
-            PlaybackManager.shared.playbackDidFail(logMessage: message, userMessage: nil)
+            PlaybackManager.shared.playbackDidFail(error: .playbackError(logMessage: message, isLocalFile: isPlayingLocalFile))
         }
     }
 
@@ -718,12 +867,15 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
         }
 
         rateObserver = player?.observe(\.rate) { [weak self] player, _ in
-            guard let self = self else { return }
+            guard let self, !self.isHandlingRateChange else { return }
+
+            self.isHandlingRateChange = true
+            defer { self.isHandlingRateChange = false }
 
             if player.rate == 1 {
                 // there's a bug where playback can be resumed from outside our app, and Apple sets the wrong playback rate, fix that here
                 // the easiest way to repeat this is to play a video at 2x, and press pause once it's in picture in picture mode
-                let requiredSpeed = PlaybackManager.shared.effects().playbackSpeed
+                let requiredSpeed = PlaybackManager.shared.effects.playbackSpeed
                 if requiredSpeed != 1 {
                     self.performSetPlaybackRate()
                 }
@@ -750,7 +902,7 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
 
         let nc = NotificationCenter.default
         playToEndObserver = nc.addObserver(forName: NSNotification.Name.AVPlayerItemDidPlayToEndTime, object: nil, queue: nil) { [weak self] notification in
-            guard let self = self else { return }
+            guard let self else { return }
 
             if !FeatureFlag.checkFinishedTimeBeforeShouldKeepPlaying.enabled {
                 self.shouldKeepPlaying = false
@@ -794,19 +946,32 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
         }
 
         playFailedObserver = nc.addObserver(forName: NSNotification.Name.AVPlayerItemFailedToPlayToEndTime, object: nil, queue: nil) { [weak self] notification in
-            guard let self = self else { return }
+            guard let self else { return }
 
             self.shouldKeepPlaying = false
 
             let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
             let errorMessage = error?.localizedDescription ?? "Unknown item did fail to finish error"
-            PlaybackManager.shared.playbackDidFail(logMessage: errorMessage, userMessage: nil)
+            if let nsError = error as? NSError, nsError.isOutOfStorage {
+                PlaybackManager.shared.playbackDidFail(error: .notEnoughStorage(logMessage: errorMessage))
+            } else {
+                PlaybackManager.shared.playbackDidFail(error: .playbackError(logMessage: errorMessage, isLocalFile: isPlayingLocalFile))
+            }
         }
 
-        _ = nc.addObserver(forName: NSNotification.Name.AVPlayerItemPlaybackStalled, object: nil, queue: nil) { [weak self] _ in
-            guard let self = self else { return }
+        playStalledObserver = nc.addObserver(forName: NSNotification.Name.AVPlayerItemPlaybackStalled, object: nil, queue: nil) { [weak self] _ in
+            guard let self else { return }
+            FileLog.shared.addMessage("Received notification of playback stall")
+            guard self.shouldKeepPlaying else { return }
 
-            if self.shouldKeepPlaying {
+            if self.isStreamingHLS {
+                // Recovering an HLS stall via play() re-seeks to the resume position, which flushes the
+                // HLS buffer and triggers another stall — a runaway loop at higher rates. Just re-apply
+                // the rate and let AVPlayer resume once it has buffered enough, without seeking.
+                FileLog.shared.addMessage("Trying to recover from HLS stall without seeking")
+                self.performSetPlaybackRate()
+            } else {
+                FileLog.shared.addMessage("Trying to recover from stall by playing")
                 self.play(completion: nil)
             }
         }
@@ -819,6 +984,7 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
         playerStatusObserver = nil
         playerItemStatusObserver = nil
         timeControlStatusObserver = nil
+        presentationSizeObserver = nil
 
         if let endObserver = playToEndObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -853,7 +1019,9 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
             return
         }
 
-        episodeArtwork.loadEmbeddedImage(asset: asset, podcastUuid: podcastUuid, episodeUuid: episodeUuid)
+        Task { @MainActor in
+            episodeArtwork.loadEmbeddedImage(asset: asset, podcastUuid: podcastUuid, episodeUuid: episodeUuid)
+        }
         #endif
     }
 
@@ -861,5 +1029,25 @@ class DefaultPlayer: PlaybackProtocol, Hashable {
 
     func setVolume(_ volume: Float) {
         player?.volume = volume
+    }
+}
+
+extension NSError {
+    /// Whether this error, or any error underlying it, reports that the device has run out of storage.
+    var isOutOfStorage: Bool {
+        var error: NSError? = self
+        var depth = 0
+        while let current = error, depth < 10 {
+            depth += 1
+            switch (current.domain, current.code) {
+            case (NSCocoaErrorDomain, NSFileWriteOutOfSpaceError),
+                 (NSPOSIXErrorDomain, Int(ENOSPC)),
+                 (AVFoundationErrorDomain, AVError.Code.diskFull.rawValue):
+                return true
+            default:
+                error = current.userInfo[NSUnderlyingErrorKey] as? NSError
+            }
+        }
+        return false
     }
 }

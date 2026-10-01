@@ -120,8 +120,8 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
             if let artworkImage = artwork {
                 fileImageView.image = artworkImage // artworkImage.kf.scaled(to: 680)
                 fileImageView.contentMode = .scaleAspectFit
-                fileImageView.backgroundColor = AppTheme.embeddedArtworkColor()
-                imageBackgroundView.backgroundColor = AppTheme.embeddedArtworkColor()
+                fileImageView.backgroundColor = AppTheme.embeddedArtworkColor
+                imageBackgroundView.backgroundColor = AppTheme.embeddedArtworkColor
                 addCustomImageButton.setTitle(L10n.fileUploadRemoveImage, for: .normal)
                 colorPickerView.reloadData()
             } else {
@@ -139,7 +139,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
             selectedColor = artwork == nil ? selectedColorIndex + 1 : selectedColorIndex
             if selectedColor > 0 {
                 fileImageView.contentMode = .scaleToFill
-                ImageManager.sharedManager.imageForUserEpisodeColor(color: selectedColor, imageView: fileImageView, size: .list, completionHandler: { found in
+                ImageManager.shared.imageForUserEpisodeColor(color: selectedColor, imageView: fileImageView, size: .list, completionHandler: { found in
                     if !found {
                         self.fileImageView.backgroundColor = AppTheme.userEpisodeColor(number: self.selectedColorIndex)
                     }
@@ -148,7 +148,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
                 if let artworkImage = artwork {
                     fileImageView.image = artworkImage.kf.scaled(to: 680)
                     fileImageView.contentMode = .scaleAspectFit
-                    imageBackgroundView.backgroundColor = AppTheme.embeddedArtworkColor()
+                    imageBackgroundView.backgroundColor = AppTheme.embeddedArtworkColor
                 }
             }
         }
@@ -170,7 +170,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
 
     required init(episode: UserEpisode) {
         uuid = episode.uuid
-        fileUrl = URL(fileURLWithPath: DownloadManager.shared.pathForEpisode(episode))
+        fileUrl = URL(fileURLWithPath: DownloadManager.shared.path(for: episode))
         episodeToEdit = episode
         name = episode.title ?? ""
         super.init(nibName: nil, bundle: nil)
@@ -196,7 +196,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
             sizeLabel.text = SizeFormatter.shared.defaultFormat(bytes: Int64(fileSize))
 
             if episode.imageColor == 0 {
-                ImageManager.sharedManager.imageForEpisode(episode, size: .list) { [weak self] image in
+                ImageManager.shared.image(for: episode, size: .list) { [weak self] image in
                     self?.artwork = image
                 }
             } else {
@@ -210,7 +210,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
             navigationItem.leftBarButtonItem = cancelButton
 
             colorPickerView.selectItem(at: IndexPath(item: selectedColorIndex, section: 0), animated: false, scrollPosition: .left)
-            view.backgroundColor = AppTheme.uploadProgressBackgroundColor()
+            view.backgroundColor = AppTheme.uploadProgressBackgroundColor
 
             nameTextfield.addTarget(self, action: #selector(textFieldDidChange(_:)), for: .editingChanged)
             setupScrollViewOffset()
@@ -228,13 +228,13 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
                 let cancelButton = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped))
                 navigationItem.leftBarButtonItem = cancelButton
 
-                view.backgroundColor = AppTheme.uploadProgressBackgroundColor()
+                view.backgroundColor = AppTheme.uploadProgressBackgroundColor
 
                 nameTextfield.addTarget(self, action: #selector(textFieldDidChange(_:)), for: .editingChanged)
                 setupFileDetails()
                 imageSaveErrorLabel.isHidden = true
                 setupScrollViewOffset()
-            } catch let error {
+            } catch {
                 showError(message: L10n.pleaseTryAgain) // TODO: update error meessage
             }
         }
@@ -258,18 +258,20 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
 
     private var avFileUtil: AVFileUtil?
     private func setupFileDetails() {
-        avFileUtil = AVFileUtil(fileURL: destinationUrl, durationHandler: { duration in
-            self.duration = duration
-        }, titleHandler: { embeddedName in
-            if let embeddedName = embeddedName {
+        avFileUtil = AVFileUtil(fileURL: destinationUrl, durationHandler: { [weak self] duration in
+            self?.duration = duration
+        }, titleHandler: { [weak self] embeddedName in
+            guard let self else { return }
+            if let embeddedName {
                 self.name = embeddedName
             }
             DispatchQueue.main.async {
                 self.nameTextfield.text = self.name
                 self.nameLabel.text = self.name
             }
-        }, artworkHandler: { image in
+        }, artworkHandler: { [weak self] image in
             DispatchQueue.main.async {
+                guard let self else { return }
                 self.embeddedImage = image
                 self.artwork = image
                 self.selectedColorIndex = 0
@@ -292,7 +294,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
 
     @objc private func setupUserAccess() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             if SubscriptionHelper.hasActiveSubscription() {
                 self.addCustomlock.isHidden = true
@@ -302,7 +304,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
                 self.addCustomImageButton.setTitle(L10n.fileUploadAddImage, for: .normal)
                 self.addCustomImageButton.isEnabled = true
                 self.addCustomlock.isHidden = false
-                self.lockView.isHidden = Settings.plusInfoDismissedOnFilesAdd()
+                self.lockView.isHidden = Settings.plusInfoDismissedOnFilesAdd
 
                 if self.embeddedImage == nil {
                     self.customiseArtworkView.addGestureRecognizer(self.lockedArtworkTapGesture)
@@ -322,7 +324,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
         Analytics.track(.userFileEditDismissed)
         navigationController?.navigationBar.isHidden = false
         if episodeToEdit == nil {
-            if let destinationUrl = destinationUrl {
+            if let destinationUrl {
                 StorageManager.removeItem(at: destinationUrl)
             }
             dismiss(animated: true, completion: nil)
@@ -339,7 +341,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
 
         let selectedColor = greyIndexPath.item == 0 ? selectedColorIndex + 1 : selectedColorIndex
 
-        if let episodeToEdit = episodeToEdit {
+        if let episodeToEdit {
             if artworkNeedsUpdating {
                 do {
                     try UserEpisodeManager.updateUserEpisodeImage(uuid: episodeToEdit.uuid, artwork: artwork, completion: {
@@ -417,7 +419,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
         }
         optionPicker.addAction(action: libraryAction)
 
-        optionPicker.show(statusBarStyle: preferredStatusBarStyle)
+        optionPicker.present(from: self)
     }
 
     private func showError(message: String) {
@@ -450,7 +452,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
     }
 
     @objc func textFieldDidChange(_ textField: UITextField) {
-        if let typedText = nameTextfield.text, typedText.count > 0 {
+        if let typedText = nameTextfield.text, !typedText.isEmpty {
             nameLabel.text = typedText
             name = typedText
             nameLabel.style = .primaryText02
@@ -463,7 +465,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
     }
 
     @objc func showSubscriptionRequired() {
-        NavigationManager.sharedManager.showUpsellView(from: self, source: .files)
+        NavigationManager.shared.showUpsellView(from: self, source: .files)
     }
 }
 
@@ -472,7 +474,7 @@ class AddCustomViewController: PCViewController, UITextFieldDelegate {
 extension AddCustomViewController: PlusLockedInfoDelegate {
     func closeInfoTapped() {
         lockView.isHidden = true
-        Settings.setPlusInfoDismissedOnFilesAdd(true)
+        Settings.plusInfoDismissedOnFilesAdd = true
     }
 
     var displayingViewController: UIViewController {

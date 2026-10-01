@@ -1,3 +1,5 @@
+import UIKit
+
 extension ExpandedCollectionViewController: UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         podcasts.count
@@ -10,7 +12,7 @@ extension ExpandedCollectionViewController: UICollectionViewDataSource, UICollec
         case .grid:
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ExpandedCollectionViewController.gridCellId, for: indexPath) as! LargeListCell
             let thisPodcast = podcasts[indexPath.row]
-            if let delegate = delegate {
+            if let delegate {
                 cell.populateFrom(thisPodcast, isSubscribed: delegate.isSubscribed(podcast: thisPodcast))
                 cell.onSubscribe = { [weak self] in
                     if let listId = self?.item.uuid, let podcastUuid = thisPodcast.uuid {
@@ -20,10 +22,10 @@ extension ExpandedCollectionViewController: UICollectionViewDataSource, UICollec
                 }
             }
             return cell
-        case .descriptive_list:
+        case .descriptiveList:
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ExpandedCollectionViewController.descriptiveCellId, for: indexPath) as! DescriptiveCollectionCell
             let thisPodcast = podcasts[indexPath.row]
-            if let delegate = delegate {
+            if let delegate {
                 cell.populateFrom(thisPodcast, isSubscribed: delegate.isSubscribed(podcast: thisPodcast))
                 cell.onSubscribe = { [weak self] in
                     if let listId = self?.item.uuid, let podcastUuid = thisPodcast.uuid {
@@ -49,6 +51,7 @@ extension ExpandedCollectionViewController: UICollectionViewDataSource, UICollec
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, referenceSizeForHeaderInSection section: Int) -> CGSize {
         guard podcastCollection != nil else { return CGSize.zero }
 
+        // swiftlint:disable:next redundant_type_annotation
         let headerView: DiscoverCollectionHeader = DiscoverCollectionHeader.fromNib()
         headerView.populate(podcastCollection: podcastCollection)
 
@@ -60,6 +63,7 @@ extension ExpandedCollectionViewController: UICollectionViewDataSource, UICollec
     func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
         let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: ExpandedCollectionViewController.headerId, for: indexPath) as! DiscoverCollectionHeader
         header.populate(podcastCollection: podcastCollection)
+        header.collageTopBleed = headerCollageBleed
         header.linkDelegate = self
         return header
     }
@@ -67,38 +71,31 @@ extension ExpandedCollectionViewController: UICollectionViewDataSource, UICollec
     // Sizing functions
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
         let viewWidth = collectionView.bounds.width - (2 * inset)
-        if viewWidth < bigDevicePortraitWidth {
-            switch cellStyle {
-            case .descriptive_list:
+        let isBigDevice = viewWidth >= bigDevicePortraitWidth
+
+        switch cellStyle {
+        case .descriptiveList:
+            guard isBigDevice else {
                 return CGSize(width: viewWidth, height: descriptiveListPreferredMaxHeight)
-            case .grid:
-                let itemWidth = (viewWidth - (gridStyleSpacing * (gridNumColumns - 1))) / gridNumColumns
-                let itemHeight = itemWidth + cellExtraHeight
-                return CGSize(width: itemWidth, height: itemHeight)
             }
-        } else {
-            switch cellStyle {
-            case .descriptive_list:
-                let numColumns = floor(viewWidth / (descriptiveListPreferredMaxWidth + descriptiveListSpacing))
-                let itemWidth = (viewWidth - (descriptiveListSpacing * (numColumns - 1))) / numColumns
-                return CGSize(width: itemWidth, height: descriptiveListPreferredMaxHeight)
-            case .grid:
-                let numColumns = floor(viewWidth / (gridPreferredWidth + gridStyleSpacing))
-                let itemWidth = (viewWidth - (gridStyleSpacing * (numColumns - 1))) / numColumns
-                let itemHeight = itemWidth + cellExtraHeight
-                return CGSize(width: itemWidth, height: itemHeight)
-            }
+            let numColumns = floor(viewWidth / (descriptiveListPreferredMaxWidth + descriptiveListSpacing))
+            let itemWidth = (viewWidth - (descriptiveListSpacing * (numColumns - 1))) / numColumns
+            return CGSize(width: itemWidth, height: descriptiveListPreferredMaxHeight)
+        case .grid:
+            let numColumns = isBigDevice ? floor(viewWidth / (gridPreferredWidth + gridStyleSpacing)) : gridNumColumns
+            let itemWidth = (viewWidth - (gridStyleSpacing * (numColumns - 1))) / numColumns
+            return CGSize(width: itemWidth, height: itemWidth + cellExtraHeight)
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
-        let topInset = (podcastCollection == nil && cellStyle == .grid) ? inset : 0
+        let topInset = (podcastCollection == nil && cellStyle != .descriptiveList) ? inset : 0
         return UIEdgeInsets(top: topInset, left: inset, bottom: 0, right: inset)
     }
 
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
         switch cellStyle {
-        case .descriptive_list:
+        case .descriptiveList:
             return 0
         case .grid:
             return inset

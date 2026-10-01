@@ -1,13 +1,11 @@
-import Combine
 import PocketCastsDataModel
 import SwiftUI
 
+@MainActor
 class BookmarkEpisodeListController: ThemedHostingController<BookmarkEpisodeListView> {
     private let playbackManager: PlaybackManager
     private let bookmarkManager: BookmarkManager
     let viewModel: BookmarkEpisodeListViewModel
-
-    private var cancellables = Set<AnyCancellable>()
 
     init(episode: BaseEpisode, displayMode: BookmarkEpisodeListView.DisplayMode = .list,
          bookmarkManager: BookmarkManager = PlaybackManager.shared.bookmarkManager,
@@ -32,7 +30,7 @@ class BookmarkEpisodeListController: ThemedHostingController<BookmarkEpisodeList
         viewModel.router = self
     }
 
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
+    @MainActor dynamic required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 }
@@ -40,16 +38,19 @@ class BookmarkEpisodeListController: ThemedHostingController<BookmarkEpisodeList
 // MARK: - BookmarkListRouter
 
 extension BookmarkEpisodeListController: BookmarkListRouter {
-    func bookmarkPlay(_ bookmark: Bookmark) {
-        playbackManager.playBookmark(bookmark, source: viewModel.analyticsSource)
+    /// The list is shown within the episode's own details, so its artwork doesn't open them again
+    var opensBookmarkEpisode: Bool { false }
+
+    func bookmarkPlay(_ bookmark: Bookmark) async throws {
+        try await playbackManager.playBookmark(bookmark, source: viewModel.analyticsSource)
     }
 
     func bookmarkEdit(_ bookmark: Bookmark) {
         let controller = BookmarkEditTitleViewController(manager: bookmarkManager,
                                                          bookmark: bookmark,
-                                                         state: .updating)
-
-        controller.source = viewModel.analyticsSource
+                                                         state: .updating,
+                                                         style: .themed,
+                                                         source: viewModel.analyticsSource)
 
         present(controller, animated: true)
     }

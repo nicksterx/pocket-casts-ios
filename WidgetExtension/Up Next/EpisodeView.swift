@@ -7,14 +7,13 @@ struct EpisodeView: View {
     @State var isPlaying: Bool = false
     @State var isFirstEpisode: Bool = false
 
-    @Environment(\.dynamicTypeSize) var typeSize
     @Environment(\.widgetColorScheme) var colorScheme
     @Environment(\.isAccentedRenderingMode) var isAccentedRenderingMode
 
     var body: some View {
         let textColor = isFirstEpisode ? colorScheme.topTextColor : colorScheme.bottomTextColor
 
-        Link(destination: CommonWidgetHelper.urlForEpisodeUuid(uuid: episode.episodeUuid)!) {
+        Link(destination: CommonWidgetHelper.url(forEpisodeUuid: episode.episodeUuid)!) {
             HStack(spacing: 12) {
                 SmallArtworkView(imageData: episode.imageData)
                     .frame(maxWidth: 52, maxHeight: 52)
@@ -26,7 +25,7 @@ struct EpisodeView: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .backwardWidgetAccentable(isAccentedRenderingMode)
-                    if isFirstEpisode, #available(iOS 17, *) {
+                    if isFirstEpisode {
                         Spacer()
                         Toggle(isOn: isPlaying, intent: PlayEpisodeIntent(episodeUuid: episode.episodeUuid)) {
                             topText
@@ -46,7 +45,7 @@ struct EpisodeView: View {
                             .opacity(isAccentedRenderingMode ? 0.6 : 1.0)
                     }
                 }
-                if !isFirstEpisode, #available(iOS 17, *) {
+                if !isFirstEpisode {
                     Toggle(isOn: isPlaying, intent: PlayEpisodeIntent(episodeUuid: episode.episodeUuid)) {}
                     .toggleStyle(WidgetPlayToggleStyle(colorScheme: colorScheme))
                 }

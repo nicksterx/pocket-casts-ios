@@ -1,6 +1,7 @@
 import Combine
 import PocketCastsDataModel
 import PocketCastsServer
+import PocketCastsUtils
 import SafariServices
 import UIKit
 
@@ -88,7 +89,7 @@ class ExpandedEpisodeListViewController: PCViewController, UITableViewDelegate, 
         DiscoverEpisodeViewModel.loadPodcast(podcastUuid, episodeUuid: episodeUuid)
             .receive(on: RunLoop.main)
             .sink { [weak self] podcast in
-                guard let podcast = podcast else {
+                guard let podcast else {
                     self?.delegate?.failedToLoadEpisode()
                     return
                 }
@@ -108,7 +109,7 @@ class ExpandedEpisodeListViewController: PCViewController, UITableViewDelegate, 
     func linkTapped() {
         guard let link = podcastCollection.webUrl, let url = URL(string: link) else { return }
 
-        if Settings.openLinks {
+        if Settings.openLinks || !URLHelper.isValidScheme(url.scheme) {
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
         } else {
             present(SFSafariViewController(with: url), animated: true, completion: nil)

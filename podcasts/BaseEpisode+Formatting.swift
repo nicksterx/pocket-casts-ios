@@ -33,7 +33,7 @@ extension BaseEpisode {
 
     func commonDisplayableInfo(includeSize: Bool) -> String {
         if downloading() {
-            if let progress = DownloadManager.shared.progressManager.progressForEpisode(uuid) {
+            if let progress = DownloadManager.shared.progressManager.progress(forEpisodeUuid: uuid) {
                 #if os(watchOS)
                     return "\(progress.percentageProgressAsString())"
                 #else
@@ -57,7 +57,7 @@ extension BaseEpisode {
             var informationLabelStr = duration > 0 ? displayableTimeLeft() : L10n.unknownDuration
 
             if includeSize, sizeInBytes > 0 {
-                if informationLabelStr.count == 0 {
+                if informationLabelStr.isEmpty {
                     informationLabelStr = SizeFormatter.shared.noDecimalFormat(bytes: sizeInBytes)
                 } else {
                     informationLabelStr += " • \(SizeFormatter.shared.noDecimalFormat(bytes: sizeInBytes))"
@@ -99,7 +99,7 @@ extension BaseEpisode {
 
     func shortDateFor(date: Date?) -> String {
         let noDate = L10n.podcastNoDate
-        guard let date = date, date.timeIntervalSince1970 > 0 else { return noDate }
+        guard let date, date.timeIntervalSince1970 > 0 else { return noDate }
 
         if Calendar.current.isDateInToday(date) {
             return L10n.today
@@ -121,7 +121,7 @@ extension BaseEpisode {
                 shortDate = calendar.monthSymbols[publishedMonth - 1]
             }
         } else {
-            shortDate = DateFormatHelper.sharedHelper.monthYearFormatter.string(from: date)
+            shortDate = DateFormatHelper.shared.monthYearFormatter.string(from: date)
         }
 
         return shortDate ?? noDate

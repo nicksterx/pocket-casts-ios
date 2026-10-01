@@ -31,8 +31,8 @@ struct CancelSubscriptionPlanRow: View {
                                 .onAppear {
                                     badgeHeight = proxy.size.height
                                 }
-                                .onChange(of: proxy.size.height) {
-                                    badgeHeight = $0
+                                .onChange(of: proxy.size.height) { _, newValue in
+                                    badgeHeight = newValue
                                 }
                         }
                     )
@@ -135,7 +135,7 @@ extension PlusPricingInfoModel.PlusProductPricingInfo {
     fileprivate var formattedMonthlyPrice: String? {
         switch identifier {
         case .yearly, .yearlyReferral, .patronYearly:
-            if let monthlyPrice = monthlyPrice, !monthlyPrice.isEmpty {
+            if let monthlyPrice, !monthlyPrice.isEmpty {
                 return L10n.iapProductMonthlyPricingFormat(monthlyPrice)
             }
             return nil
@@ -168,7 +168,7 @@ struct CancelSubscriptionPlanRow_Preview: PreviewProvider {
                     basePrice: 39.99),
                 selected: true
             ) { _ in }
-                .environmentObject(Theme.sharedTheme)
+                .environmentObject(Theme.shared)
             CancelSubscriptionPlanRow(
                 product: .init(
                     identifier: .monthly,
@@ -180,7 +180,7 @@ struct CancelSubscriptionPlanRow_Preview: PreviewProvider {
                     basePrice: 3.99),
                 selected: false
             ) { _ in }
-                .environmentObject(Theme.sharedTheme)
+                .environmentObject(Theme.shared)
             CancelSubscriptionPlanRow(
                 product: .init(
                     identifier: .yearlyReferral,
@@ -192,7 +192,7 @@ struct CancelSubscriptionPlanRow_Preview: PreviewProvider {
                     basePrice: 39.99),
                 selected: false
             ) { _ in }
-                .environmentObject(Theme.sharedTheme)
+                .environmentObject(Theme.shared)
         }
         .background(.gray)
         .previewLayout(.fixed(width: 393, height: 300))

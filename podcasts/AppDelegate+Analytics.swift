@@ -1,6 +1,7 @@
 import PocketCastsServer
 import PocketCastsUtils
 import PocketCastsDataModel
+import UIKit
 
 extension AppDelegate {
     private var shouldRegisterAdapters: Bool {
@@ -16,8 +17,18 @@ extension AppDelegate {
 
         // Only setup if protected data is available, the user hasn't opted out, and we aren't already registered
         if !Settings.analyticsOptOut() {
-            adapters = [AnalyticsLoggingAdapter(), TracksAdapter(), CrashLoggingAdapter()]
+            adapters = [
+                AnalyticsLoggingAdapter(),
+                TracksAdapter(userDefaults: SharedConstants.GroupUserDefaults.defaults),
+                CrashLoggingAdapter()
+            ]
+#if DEBUG
+            adapters.append(AnalyticsOSLogAdapter())
+#endif
         }
+
+        // LiveAnalyticsStreamer buffers events for all builds, sends when server enables liveAnalyticsUrl
+        adapters.append(LiveAnalyticsStreamer())
 
         adapters.append(NotificationsCoordinator.shared)
 
@@ -40,14 +51,14 @@ extension AppDelegate {
     }
 
     func logStaleDownloads() {
-        let failedDownloadCount = DataManager.sharedManager.failedDownloadedEpisodesCount()
+        let failedDownloadCount = DataManager.shared.failedDownloadedEpisodesCount()
 
         guard failedDownloadCount > 0 else {
             return
         }
 
-        let oldestFailedDownload = DataManager.sharedManager.oldestFailedEpisodeDownload()
-        let newestFailedDownload = DataManager.sharedManager.newestFailedEpisodeDownload()
+        let oldestFailedDownload = DataManager.shared.oldestFailedEpisodeDownload()
+        let newestFailedDownload = DataManager.shared.newestFailedEpisodeDownload()
 
         let properties: [String: Any?] =  ["failed_download_count": failedDownloadCount,
                                            "oldest_failed_download": oldestFailedDownload?.formatted(.iso8601),

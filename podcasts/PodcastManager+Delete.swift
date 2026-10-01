@@ -8,7 +8,7 @@ extension PodcastManager {
         let savedFolderUuid = podcast.folderUuid
 
         if SyncManager.isUserLoggedIn() {
-            let episodes = dataManager.allEpisodesForPodcast(id: podcast.id)
+            let episodes = dataManager.allEpisodes(forPodcastId: podcast.id)
             for episode in episodes {
                 EpisodeManager.deleteDownloadedFiles(episode: episode)
             }
@@ -19,7 +19,7 @@ extension PodcastManager {
             podcast.subscribed = 0
             podcast.autoArchiveEpisodeLimit = 0
             podcast.autoDownloadSetting = AutoDownloadSetting.off.rawValue
-            podcast.isPushEnabled = false
+            podcast.pushEnabled = false
             podcast.syncStatus = SyncStatus.notSynced.rawValue
             podcast.autoAddToUpNext = AutoAddToUpNextSetting.off.rawValue
             podcast.settings = PodcastSettings.defaults

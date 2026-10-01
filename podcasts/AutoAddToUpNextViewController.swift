@@ -85,18 +85,18 @@ class AutoAddToUpNextViewController: PCViewController, UITableViewDelegate, UITa
                 addAutoAddLimit(amount: 500, to: options)
                 addAutoAddLimit(amount: 1000, to: options)
 
-                options.show(statusBarStyle: preferredStatusBarStyle)
+                options.present(from: self)
             case .ifLimitReached:
                 let options = OptionsPicker(title: L10n.settingsAutoAddLimitReached)
                 addOnLimitReached(action: .addToTopOnly, to: options)
                 addOnLimitReached(action: .stopAdding, to: options)
 
-                options.show(statusBarStyle: preferredStatusBarStyle)
+                options.present(from: self)
             case .selectPodcasts:
                 let podcastSelectViewController = PodcastChooserViewController()
                 podcastSelectViewController.analyticsSource = .autoAdd
                 podcastSelectViewController.delegate = self
-                let allPodcasts = DataManager.sharedManager.allPodcasts(includeUnsubscribed: false)
+                let allPodcasts = DataManager.shared.allPodcasts(includeUnsubscribed: false)
                 podcastSelectViewController.selectedUuids = allPodcasts.filter { $0.autoAddToUpNextOn() }.map(\.uuid)
                 navigationController?.pushViewController(podcastSelectViewController, animated: true)
             }
@@ -106,12 +106,12 @@ class AutoAddToUpNextViewController: PCViewController, UITableViewDelegate, UITa
             addActionForPodcast(podcast: podcast, setting: .addFirst, label: L10n.top, to: options)
             addActionForPodcast(podcast: podcast, setting: .addLast, label: L10n.bottom, to: options)
 
-            options.show(statusBarStyle: preferredStatusBarStyle)
+            options.present(from: self)
         }
     }
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        section == 0 ? nil : L10n.settingsAutoAddPodcasts
+        section == 0 || autoDownloadPodcasts.isEmpty ? nil : L10n.settingsAutoAddPodcasts
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
@@ -136,13 +136,13 @@ class AutoAddToUpNextViewController: PCViewController, UITableViewDelegate, UITa
     }
 
     func reloadDownloadedPodcasts() {
-        autoDownloadPodcasts = DataManager.sharedManager.allPodcasts(includeUnsubscribed: false).filter { $0.autoAddToUpNextOn() }
+        autoDownloadPodcasts = DataManager.shared.allPodcasts(includeUnsubscribed: false).filter { $0.autoAddToUpNextOn() }
     }
 
     private func addActionForPodcast(podcast: Podcast, setting: AutoAddToUpNextSetting, label: String, to: OptionsPicker) {
         let action = OptionAction(label: label, selected: podcast.autoAddToUpNextSetting() == setting) { [weak self] in
             podcast.setAutoAddToUpNext(setting: setting)
-            DataManager.sharedManager.save(podcast: podcast)
+            DataManager.shared.save(podcast: podcast)
             NotificationCenter.postOnMainThread(notification: Constants.Notifications.podcastUpdated, object: podcast.uuid)
             self?.mainTable.reloadData()
             Settings.trackValueChanged(.settingsAutoAddUpNextPodcastPositionOptionChanged, value: setting)

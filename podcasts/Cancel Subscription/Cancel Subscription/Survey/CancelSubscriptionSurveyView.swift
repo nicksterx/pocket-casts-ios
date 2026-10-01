@@ -1,4 +1,5 @@
 import SwiftUI
+import EndOfYear
 
 struct CancelSubscriptionSurveyView: View {
     @EnvironmentObject var theme: Theme
@@ -43,17 +44,13 @@ struct CancelSubscriptionSurveyView: View {
                     }
                     .id("content")
                 }
-                .onChange(of: isFocused) { focused in
+                .onChange(of: isFocused) { _, focused in
                     withAnimation {
                         scrollProxy.scrollTo(focused ? "bottom" : "content", anchor: focused ? .bottom : .top)
                     }
                 }
                 .padding(.top, 48)
-                .modify {
-                    if #available(iOS 16.4, *) {
-                        $0.scrollBounceBehavior(.basedOnSize)
-                    }
-                }
+                .scrollBounceBehavior(.basedOnSize)
             }
 
             VStack {
@@ -150,5 +147,5 @@ struct CancelSubscriptionSurveyView: View {
 
 #Preview {
     CancelSubscriptionSurveyView(viewModel: CancelSubscriptionSurveyViewModel(navigationController: nil))
-        .environmentObject(Theme.sharedTheme)
+        .environmentObject(Theme.shared)
 }

@@ -32,7 +32,7 @@ class UpgradeAccountViewModel: PlusPurchaseModel {
         self.flowSource = flowSource
         self.style = style
         super.init()
-        loadPrices() {
+        loadPrices() { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.products = self.pricingInfo.products.filter {
@@ -121,17 +121,11 @@ class UpgradeAccountViewModel: PlusPurchaseModel {
     func dismissTapped(originalDismiss dismiss: DismissAction?) {
         track(.plusPromotionDismissed)
 
-        guard flowSource == .accountCreated, !FeatureFlag.newOnboardingAccountCreation.enabled, let navigationController else {
-            if navigationController == nil {
-                dismiss?()
-            } else {
-                navigationController?.dismiss(animated: true)
-            }
-            return
+        if navigationController == nil {
+            dismiss?()
+        } else {
+            navigationController?.dismiss(animated: true)
         }
-
-        let controller = WelcomeViewModel.make(in: navigationController, displayType: .newAccount)
-        navigationController.pushViewController(controller, animated: true)
     }
 
     var title: String {
@@ -139,10 +133,10 @@ class UpgradeAccountViewModel: PlusPurchaseModel {
     }
 
     func purchaseTapped() {
-        track(.plusPromotionUpgradeButtonTapped)
+        track(.plusPromotionUpgradeButtonTapped, properties: ["frequency": selectedProduct.frequency.rawValue])
 
         guard SyncManager.isUserLoggedIn() else {
-            presentLogin(with: ProductInfo.init(plan: upgradeTier.plan, frequency: selectedFrequency))
+            presentLogin(with: ProductInfo(plan: upgradeTier.plan, frequency: selectedFrequency))
             return
         }
         purchase(product: selectedProduct)

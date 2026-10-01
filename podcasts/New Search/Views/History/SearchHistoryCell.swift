@@ -31,7 +31,7 @@ struct SearchHistoryCell: View {
         ZStack {
             Button(action: {
                 if let episode = entry.episode {
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.episodePageKey, data: [NavigationManager.episodeUuidKey: episode.uuid, NavigationManager.podcastKey: episode.podcastUuid])
+                    NavigationManager.shared.navigateTo(NavigationManager.episodePageKey, data: [NavigationManager.episodeUuidKey: episode.uuid, NavigationManager.podcastKey: episode.podcastUuid])
                 } else if let podcast = entry.podcast {
                     podcast.navigateTo()
                 } else if let searchTerm = entry.searchTerm {
@@ -59,7 +59,7 @@ struct SearchHistoryCell: View {
                             .padding(.trailing, 12)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(title)
+                            ExplicitBadgeHelper.inlineTitle(title, isExplicit: entry.podcast?.kind == .podcast && entry.podcast?.resolvedIsExplicit == true, theme: theme.activeTheme)
                                 .font(style: .subheadline, weight: .medium)
                                 .foregroundColor(AppTheme.color(for: .primaryText01, theme: theme))
                                 .lineLimit(2)

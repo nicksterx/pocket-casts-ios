@@ -3,7 +3,7 @@ import PocketCastsServer
 import UIKit
 import PocketCastsUtils
 
-extension TrimSilenceAmount: AnalyticsDescribable {
+extension TrimSilenceAmount {
     var description: String {
         switch self {
         case .off:
@@ -20,19 +20,6 @@ extension TrimSilenceAmount: AnalyticsDescribable {
     func isEnabled() -> Bool {
         self != .off
     }
-
-    var analyticsDescription: String {
-        switch self {
-        case .off:
-            return "off"
-        case .low:
-            return "mild"
-        case .medium:
-            return "medium"
-        case .high:
-            return "mad_max"
-        }
-    }
 }
 
 class PlaybackEffects {
@@ -44,25 +31,15 @@ class PlaybackEffects {
     var isGlobal: Bool = true
 
     class func effectsFor(podcast: Podcast) -> PlaybackEffects {
-        if FeatureFlag.newSettingsStorage.enabled {
-            if !podcast.settings.customEffects { return globalEffects() }
-        } else {
-            if !podcast.overrideGlobalEffects { return globalEffects() }
-        }
+        if !podcast.overrideGlobalEffects { return globalEffects() }
 
         let effects = PlaybackEffects()
 
         effects.isGlobal = false
 
-        if FeatureFlag.newSettingsStorage.enabled {
-            effects.trimSilence = podcast.settings.trimSilence.amount
-            effects.volumeBoost = podcast.settings.boostVolume
-            effects.playbackSpeed = podcast.settings.playbackSpeed
-        } else {
-            effects.trimSilence = convertToTrimSilenceAmount(podcast.trimSilenceAmount)
-            effects.volumeBoost = podcast.boostVolume
-            effects.playbackSpeed = podcast.playbackSpeed
-        }
+        effects.trimSilence = convertToTrimSilenceAmount(podcast.trimSilenceAmount)
+        effects.volumeBoost = podcast.boostVolume
+        effects.playbackSpeed = podcast.playbackSpeed
 
         return effects
     }
@@ -71,17 +48,11 @@ class PlaybackEffects {
         let effects = PlaybackEffects()
         effects.isGlobal = true
         let savedSpeed: Double
-        if FeatureFlag.newSettingsStorage.enabled {
-            effects.trimSilence = SettingsStore.appSettings.trimSilence.amount
-            effects.volumeBoost = SettingsStore.appSettings.volumeBoost
-            savedSpeed = SettingsStore.appSettings.playbackSpeed
-        } else {
-            let removeSilenceAmount = UserDefaults.standard.integer(forKey: Constants.UserDefaults.globalRemoveSilence)
-            effects.trimSilence = convertToTrimSilenceAmount(Int32(removeSilenceAmount))
-            effects.volumeBoost = UserDefaults.standard.bool(forKey: Constants.UserDefaults.globalVolumeBoost)
+        let removeSilenceAmount = UserDefaults.standard.integer(forKey: Constants.UserDefaults.globalRemoveSilence)
+        effects.trimSilence = convertToTrimSilenceAmount(Int32(removeSilenceAmount))
+        effects.volumeBoost = UserDefaults.standard.bool(forKey: Constants.UserDefaults.globalVolumeBoost)
 
-            savedSpeed = UserDefaults.standard.double(forKey: Constants.UserDefaults.globalPlaybackSpeed)
-        }
+        savedSpeed = UserDefaults.standard.double(forKey: Constants.UserDefaults.globalPlaybackSpeed)
 
         var roundedSpeed = round(savedSpeed * 10.0) / 10.0
         if roundedSpeed < 0.5 {
@@ -104,17 +75,6 @@ class PlaybackEffects {
         } else if playbackSpeed < 2 {
             playbackSpeed = 2
         }
-    }
-
-    func incrementSpeedBy(_ value: Double) {
-        var currentSpeed = playbackSpeed
-
-        currentSpeed += value
-        if currentSpeed > SharedConstants.PlaybackEffects.maximumPlaybackSpeed {
-            currentSpeed = 1.0
-        }
-
-        playbackSpeed = currentSpeed
     }
 
     private class func convertToTrimSilenceAmount(_ value: Int32) -> TrimSilenceAmount {

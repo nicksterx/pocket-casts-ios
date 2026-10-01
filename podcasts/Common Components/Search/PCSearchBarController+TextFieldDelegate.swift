@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 extension PCSearchBarController: UITextFieldDelegate {
     func textFieldDidBeginEditing(_ textField: UITextField) {
@@ -12,7 +13,7 @@ extension PCSearchBarController: UITextFieldDelegate {
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        if let searchTerm = textField.text, searchTerm.count > 0 {
+        if let searchTerm = textField.text, !searchTerm.isEmpty {
             textField.resignFirstResponder()
             cancelSearchTimer()
             search(searchTerm: searchTerm, triggerdByTimer: false)
@@ -24,7 +25,7 @@ extension PCSearchBarController: UITextFieldDelegate {
     @objc func textFieldDidChange() {
         let searchTerm = searchTextField.text
 
-        if let searchTerm = searchTerm, searchTerm.count > 0 {
+        if let searchTerm, !searchTerm.isEmpty {
             clearSearchBtn.isHidden = false
             searchDelegate?.searchTermChanged(searchTerm)
             resetSearchTimer()

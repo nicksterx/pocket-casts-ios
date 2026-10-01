@@ -22,17 +22,17 @@ class LoginCoordinator: NSObject, OnboardingModel {
         let maxCount = bundledImages.count
         let bundledImages = bundledImages
 
-        var randomPodcasts = DataManager.sharedManager.allPodcasts(includeUnsubscribed: true)
+        var randomPodcasts = DataManager.shared.allPodcasts(includeUnsubscribed: true)
             // Only return items we have a cached image for
             .filter {
-                ImageManager.sharedManager.hasCachedImage(for: $0.uuid, size: .grid)
+                ImageManager.shared.hasCachedImage(for: $0.uuid, size: .grid)
             }
             // Return a random-ish order
             .shuffled()
             // Limit to the number of bundled images we have
             .prefix(maxCount)
             // Convert the podcasts into the model, we use enumerated because we need the index to map to the placeholder
-            .enumerated().map { (index, item) in
+            .enumerated().map { index, item in
                 LoginHeaderImage(podcast: item, imageName: nil, placeholderImageName: bundledImages[index].imageName ?? "")
             }
 
@@ -56,15 +56,9 @@ class LoginCoordinator: NSObject, OnboardingModel {
     func loginTapped() {
         socialAuthProvider = nil
         OnboardingFlow.shared.track(.setupAccountButtonTapped, properties: ["button": "sign_in"])
-        if FeatureFlag.newOnboardingAccountCreation.enabled {
-            let vc = OnboardingHostingViewController(rootView: SyncSigninView(coordinator: self, loginAgain: false, onCompleted: { self.navigationController?.presentingViewController?.dismiss(animated: true) }).environmentObject(Theme.sharedTheme))
-            vc.viewModel = self
-            navigationController?.pushViewController(vc, animated: true)
-        } else {
-            let controller = SyncSigninViewController()
-            controller.delegate = self
-            navigationController?.pushViewController(controller, animated: true)
-        }
+        let vc = OnboardingHostingViewController(rootView: SyncSigninView(coordinator: self, loginAgain: false, onCompleted: { self.navigationController?.presentingViewController?.dismiss(animated: true) }).environmentObject(Theme.shared))
+        vc.viewModel = self
+        navigationController?.pushViewController(vc, animated: true)
     }
 
     func signUpTapped() {
@@ -77,21 +71,13 @@ class LoginCoordinator: NSObject, OnboardingModel {
 
     func getStartedTapped() {
         OnboardingFlow.shared.updateAnalyticsSource(.onboardingRecommendations)
-        let hostingController: UIViewController
-        if FeatureFlag.newOnboardingRecommendationChanges.enabled {
-            let view = InterestsView(continueCallback: { categories in
-                self.interestsContinueTapped(categories: categories)
-            }) {
-                self.interestsContinueTapped(categories: nil)
-            }
-            let controller = OnboardingHostingViewController(rootView: view.setupDefaultEnvironment())
-            controller.viewModel = self
-            hostingController = controller
-        } else {
-            let controller = OnboardingHostingViewController(rootView: OnboardingRecommendationsView(coordinator: self).setupDefaultEnvironment())
-            controller.viewModel = self
-            hostingController = controller
+        let view = InterestsView(continueCallback: { categories in
+            self.interestsContinueTapped(categories: categories)
+        }) {
+            self.interestsContinueTapped(categories: nil)
         }
+        let hostingController = OnboardingHostingViewController(rootView: view.setupDefaultEnvironment())
+        hostingController.viewModel = self
 
         hostingController.navigationItem.backBarButtonItem = UIBarButtonItem(title: "", style: .plain, target: nil, action: nil)
         navigationController?.pushViewController(hostingController, animated: true)
@@ -227,7 +213,12 @@ extension LoginCoordinator: SyncSigninDelegate, CreateAccountDelegate {
     }
 
     func handleAccountCreated() {
-        Analytics.track(.userAccountCreated, properties: ["source": socialAuthProvider ?? "password"])
+        var properties: [String: Any] = ["source": socialAuthProvider ?? "password", "flow": OnboardingFlow.shared.currentFlow]
+        if let originSource = OnboardingFlow.shared.originSource {
+            properties["flow_source"] = originSource.rawValue
+        }
+        Analytics.track(.userAccountCreated, properties: properties)
+        OnboardingFlow.shared.markAccountCreated()
         OnboardingFlow.shared.accountCreated?(true)
         if OnboardingFlow.shared.currentFlow.shouldDismiss {
             handleDismiss()
@@ -261,22 +252,14 @@ extension LoginCoordinator: SyncSigninDelegate, CreateAccountDelegate {
     private func goToPlus(from source: PlusLandingViewModel.Source) {
         // Update the flow to make sure the correct analytics source is passed on
         OnboardingFlow.shared.updateAnalyticsSource(source == .login ? .login: .accountCreated)
-        if FeatureFlag.newOnboardingUpgrade.enabled {
-            let controller = UpgradeAccountViewModel.make(in: navigationController,
-                                                          flowSource: source,
-                                                          viewSource: .onboarding,
-                                                          plan: .plus,
-                                                          frequency: .yearly,
-                                                          )
-            controller.modalPresentationStyle = .fullScreen
-            navigationController?.setViewControllers([controller], animated: true)
-        } else {
-            let controller = PlusLandingViewModel.make(in: navigationController,
-                                                       from: source,
-                                                       viewSource: .onboarding,
-                                                       config: .init(continuePurchasing: continuePurchasing))
-            navigationController?.setViewControllers([controller], animated: true)
-        }
+        let controller = UpgradeAccountViewModel.make(in: navigationController,
+                                                      flowSource: source,
+                                                      viewSource: .onboarding,
+                                                      plan: .plus,
+                                                      frequency: .yearly,
+                                                      )
+        controller.modalPresentationStyle = .fullScreen
+        navigationController?.setViewControllers([controller], animated: true)
     }
 }
 
@@ -290,7 +273,7 @@ extension LoginCoordinator {
 
         let controller: UIViewController
 
-        if FeatureFlag.newOnboardingAccountCreation.enabled && isOnboarding {
+        if isOnboarding {
             let view = IntroCarouselView(coordinator: coordinator)
                 .setupDefaultEnvironment()
             let hostingController = IntroCarouselHostingController(rootView: view)

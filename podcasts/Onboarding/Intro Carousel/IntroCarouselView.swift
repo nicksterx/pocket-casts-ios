@@ -1,4 +1,5 @@
 import SwiftUI
+import EndOfYear
 
 fileprivate extension String {
     func wrapInSmartQuotes() -> String {
@@ -38,7 +39,7 @@ class IntroCarouselHostingController<Content>: OnboardingHostingViewController<C
             destinationVC.navigationItem.leftBarButtonItem?.customView?.alpha = alpha
             destinationVC.navigationItem.rightBarButtonItem?.customView?.alpha = alpha
             destinationVC.navigationItem.titleView?.alpha = alpha
-            if let navigationBar = destinationVC.navigationController?.navigationBar {
+            if !LiquidGlass.isEnabled, let navigationBar = destinationVC.navigationController?.navigationBar {
                 let navigationBarAppearance = UINavigationBarAppearance()
                 navigationBarAppearance.configureWithOpaqueBackground()
                 navigationBarAppearance.shadowColor = nil

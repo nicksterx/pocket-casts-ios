@@ -39,7 +39,7 @@ class EpisodeListTableViewCell: UITableViewCell {
         playButton.isPlaying = false
         observePlayStateChanges()
 
-        Theme.sharedTheme.$activeTheme
+        Theme.shared.$activeTheme
             .receive(on: RunLoop.main)
             .sink(receiveValue: { [unowned self] _ in
                 self.updateTheme()
@@ -63,7 +63,7 @@ class EpisodeListTableViewCell: UITableViewCell {
 
         viewModel.$imageUUID
             .sink(receiveValue: { [unowned self] uuid in
-                if let uuid = uuid {
+                if let uuid {
                     self.podcastImage.setPodcast(uuid: uuid, size: .grid)
                 }
             })

@@ -1,12 +1,13 @@
 import CarPlay
 import Foundation
 import PocketCastsDataModel
+import CoreMedia
 
 extension CarPlaySceneDelegate {
     func convertToListItems(episodes: [BaseEpisode], showArtwork: Bool, playlist: AutoplayHelper.Playlist?) -> [CPListItem] {
         var items = [CPListItem]()
         for episode in episodes {
-            let artwork = showArtwork ? CarPlayImageHelper.imageForEpisode(episode) : nil
+            let artwork = showArtwork ? CarPlayImageHelper.image(for: episode) : nil
             let item = CPListItem(text: episode.displayableTitle(), detailText: episode.subTitle(), image: artwork)
 
             if episode.unplayed() {
@@ -21,11 +22,26 @@ extension CarPlaySceneDelegate {
                 }
             }
 
+            // On iOS 26.4 and later, CarPlay uses `playbackConfiguration` to display
+            // elapsed time and duration, which lets it show playback progress correctly.
+            if #available(iOS 26.4, *) {
+                let duration = episode.duration
+                var elapsedTime = min(episode.playedUpTo, episode.duration)
+                if episode.unplayed() {
+                    elapsedTime = 0
+                } else if episode.played() {
+                    elapsedTime = episode.duration
+                }
+                if duration > 0 {
+                    item.playbackConfiguration = CPPlaybackConfiguration(preferredPresentation: .audio, playbackAction: .none, elapsedTime: CMTime(seconds: elapsedTime, preferredTimescale: .audio), duration: CMTime(seconds: duration, preferredTimescale: .audio))
+                }
+            }
+
             if episode.episodeStatus != DownloadStatus.downloaded.rawValue {
                 item.accessoryType = .cloud
             }
 
-            item.isPlaying = PlaybackManager.shared.isNowPlayingEpisode(episodeUuid: episode.uuid)
+            item.isPlaying = PlaybackManager.shared.isCurrentEpisode(uuid: episode.uuid)
 
             item.handler = { [weak self] _, completion in
                 self?.episodeTapped(episode, playlist: playlist)
@@ -39,7 +55,7 @@ extension CarPlaySceneDelegate {
     }
 
     func convertPodcastToListItem(_ podcast: Podcast) -> CPListItem {
-        let item = CPListItem(text: podcast.title, detailText: nil, image: CarPlayImageHelper.imageForPodcast(podcast))
+        let item = CPListItem(text: podcast.title, detailText: nil, image: CarPlayImageHelper.image(for: podcast))
 
         item.accessoryType = .disclosureIndicator
         item.handler = { [weak self] _, completion in
@@ -53,7 +69,7 @@ extension CarPlaySceneDelegate {
     func createUpNextImageItem(episodes: [BaseEpisode]) -> CPListImageRowItem {
         var images = [UIImage]()
         for episode in episodes {
-            images.append(CarPlayImageHelper.imageForEpisode(episode, maxSize: CPListImageRowItem.maximumImageSize))
+            images.append(CarPlayImageHelper.image(for: episode, maxSize: CPListImageRowItem.maximumImageSize))
         }
 
         let item = CPListImageRowItem(text: L10n.carplayUpNextQueue, images: images)
@@ -65,7 +81,7 @@ extension CarPlaySceneDelegate {
         }
 
         item.handler = { [weak self] _, completion in
-            guard let self = self else { return }
+            guard let self else { return }
 
             self.upNextTapped(showNowPlaying: true)
             completion()

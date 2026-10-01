@@ -6,7 +6,7 @@ import PocketCastsUtils
 class PodcastManager: NSObject {
     private static let maxAutoDownloadSeperationTime = 12.hours
 
-    @objc static let shared = PodcastManager(dataManager: DataManager.sharedManager, downloadManager: DownloadManager.shared)
+    @objc static let shared = PodcastManager(dataManager: DataManager.shared, downloadManager: DownloadManager.shared)
 
     lazy var isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -37,7 +37,7 @@ class PodcastManager: NSObject {
 
     // MARK: - Notifications
 
-    #if !os(watchOS) && !APPCLIP
+    #if !os(watchOS) && !APPCLIP && !os(tvOS)
         func setNotificationsEnabled(podcast: Podcast, enabled: Bool) {
             if enabled {
                 if !NotificationsGroup.newEpisodes.isEnabled {
@@ -46,7 +46,7 @@ class PodcastManager: NSObject {
                     let podcasts = dataManager.allPodcasts(includeUnsubscribed: false)
                     var foundPushOff = false
                     for podcast in podcasts {
-                        if !podcast.isPushEnabled {
+                        if !podcast.pushEnabled {
                             foundPushOff = true
                             break
                         }
@@ -59,13 +59,7 @@ class PodcastManager: NSObject {
                 }
             }
 
-            if FeatureFlag.newSettingsStorage.enabled {
-                podcast.settings.notification = enabled
-                podcast.syncStatus = SyncStatus.notSynced.rawValue
-                dataManager.save(podcast: podcast)
-            } else {
-                dataManager.savePushSetting(podcast: podcast, pushEnabled: enabled)
-            }
+            dataManager.savePushSetting(podcast: podcast, pushEnabled: enabled)
         }
     #endif
 
@@ -146,7 +140,7 @@ class PodcastManager: NSObject {
 
     private func checkForEpisodesToDownload(podcast: Podcast) {
         if !podcast.autoDownloadOn() { return }
-        let episodesLimit = FeatureFlag.autoDownloadOnSubscribe.enabled ? Settings.autoDownloadLimits().rawValue : 4
+        let episodesLimit = FeatureFlag.autoDownloadOnSubscribe.enabled ? Settings.autoDownloadLimits.rawValue : 4
         let latestEpisodes = dataManager.findEpisodesWhere(customWhere: "podcast_id == ? ORDER BY publishedDate DESC, addedDate DESC LIMIT ?", arguments: [podcast.id, episodesLimit])
         guard let latestEpisode = latestEpisodes.first else { return } // no episodes to download
 
@@ -172,7 +166,7 @@ class PodcastManager: NSObject {
 
     // MARK: - Import
 
-    #if !os(watchOS)
+    #if !os(watchOS) && !os(tvOS)
         func importSharedItemFromUrl(_ strippedUrl: String, completion: @escaping (IncomingShareItem?) -> Void) {
             importerQueue.cancelAllOperations()
 
@@ -181,7 +175,7 @@ class PodcastManager: NSObject {
         }
     #endif
 
-    #if !os(watchOS) && !APPCLIP
+    #if !os(watchOS) && !APPCLIP && !os(tvOS)
         func importPodcastsFromOpml(_ opmlFile: URL, progressWindow: ShiftyLoadingAlert? = nil) {
             importerQueue.cancelAllOperations()
 
@@ -190,10 +184,10 @@ class PodcastManager: NSObject {
         }
     #endif
 
-    class func episodeCountForPodcast(_ podcast: Podcast, excludeArchive: Bool) -> Int {
+    class func episodeCount(for podcast: Podcast, excludeArchive: Bool) -> Int {
         let archivedFilter = excludeArchive ? " AND archived = 0" : ""
         let query = "SELECT COUNT(*) FROM \(DataManager.episodeTableName) WHERE podcast_id = ?\(archivedFilter)"
 
-        return DataManager.sharedManager.count(query: query, values: [podcast.id])
+        return DataManager.shared.count(query: query, values: [podcast.id])
     }
 }

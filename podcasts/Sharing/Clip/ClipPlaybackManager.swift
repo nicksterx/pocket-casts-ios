@@ -19,7 +19,7 @@ class ClipPlaybackManager: ObservableObject {
     private var isSeeking: Bool = false
     private var cancellables = Set<AnyCancellable>()
 
-    @ObservedObject var clipTime: ClipTime = ClipTime(start: 0, end: 0)
+    @ObservedObject var clipTime = ClipTime(start: 0, end: 0)
 
     func play(episode: BaseEpisode, clipTime: ObservedObject<ClipTime>) {
         if avPlayer != nil {
@@ -41,14 +41,8 @@ class ClipPlaybackManager: ObservableObject {
 
         let playbackCMTime = CMTime(seconds: playbackTime, preferredTimescale: .audio)
 
-        normalPlaybackManager.activateAudioSession(completion: { [weak self] activated in
-            if Thread.current.isMainThread {
-                self?.startPlayer(at: playbackCMTime)
-            } else {
-                DispatchQueue.main.async { [weak self] in
-                    self?.startPlayer(at: playbackCMTime)
-                }
-            }
+        normalPlaybackManager.activateAudioSession(completion: { [weak self] _ in
+            self?.startPlayer(at: playbackCMTime)
         })
 
         isPlaying = true
@@ -83,6 +77,7 @@ class ClipPlaybackManager: ObservableObject {
         currentTime = 0
         duration = 0
         removeTimeObserver()
+        cancellables.removeAll()
     }
 
     private func setupTimeObserver() {

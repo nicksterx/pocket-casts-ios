@@ -23,7 +23,7 @@ extension PodcastViewController {
     }
 
     func checkIfPodcastNeedsUpdating() {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
         let addMissingEpisodes = Settings.addMissingEpisodes
         ServerPodcastManager.shared.updatePodcastIfRequired(podcast: podcast, addMissingEpisodes: addMissingEpisodes) { [weak self] updated in
             if updated {
@@ -33,7 +33,7 @@ extension PodcastViewController {
     }
 
     private func processPodcastAdded(added: Bool, uuid: String?) {
-        guard let uuid = uuid, let podcast = DataManager.sharedManager.findPodcast(uuid: uuid, includeUnsubscribed: true) else {
+        guard let uuid, let podcast = DataManager.shared.findPodcast(uuid: uuid, includeUnsubscribed: true) else {
             loadingEnded(successfully: false)
 
             return
@@ -47,7 +47,7 @@ extension PodcastViewController {
         if SyncManager.isUserLoggedIn() {
             guard let episodes = ApiServerHandler.shared.retrieveEpisodeTaskSynchronouusly(podcastUuid: uuid) else { return }
 
-            DataManager.sharedManager.saveBulkEpisodeSyncInfo(episodes: DataConverter.convert(syncInfoEpisodes: episodes))
+            DataManager.shared.saveBulkEpisodeSyncInfo(episodes: DataConverter.convert(syncInfoEpisodes: episodes))
         }
         loadLocalEpisodes(podcast: podcast, animated: false)
 
@@ -83,7 +83,7 @@ extension PodcastViewController {
             self.loadingIndicator.stopAnimating()
             UIView.animate(withDuration: 0.5) {
                 self.episodesTable.alpha = 1
-            } completion: { success in
+            } completion: { _ in
                 if FeatureFlag.podcastFeedUpdate.enabled {
                     self.showPodcastFeedReloadTipIfNeeded()
                 }

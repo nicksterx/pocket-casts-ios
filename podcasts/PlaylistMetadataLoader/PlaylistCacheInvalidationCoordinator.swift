@@ -1,10 +1,13 @@
 import Combine
+import Foundation
 import PocketCastsDataModel
 
 /// Coordinates playlist cache invalidation in response to episode changes.
 /// Subscribes to episode change notifications, determines which playlists are affected,
 /// and triggers stale marking with debounced refresh.
 final class PlaylistCacheInvalidationCoordinator {
+
+    static let shared = PlaylistCacheInvalidationCoordinator(playlistMetadataLoader: .shared)
 
     private let playlistMetadataLoader: PlaylistMetadataLoader
     private let dataManager: DataManager
@@ -20,7 +23,7 @@ final class PlaylistCacheInvalidationCoordinator {
 
     init(
         playlistMetadataLoader: PlaylistMetadataLoader,
-        dataManager: DataManager = .sharedManager,
+        dataManager: DataManager = .shared,
         debounceDelay: TimeInterval = 0.3
     ) {
         self.playlistMetadataLoader = playlistMetadataLoader

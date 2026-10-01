@@ -70,7 +70,7 @@ class PodcastSettingsViewController: PCViewController {
         guard let uuidLoaded = notification.object as? String else { return }
 
         if podcast.uuid == uuidLoaded {
-            if let updatedPodcast = DataManager.sharedManager.findPodcast(uuid: podcast.uuid) {
+            if let updatedPodcast = DataManager.shared.findPodcast(uuid: podcast.uuid) {
                 podcast = updatedPodcast
                 updateColors()
             }
@@ -83,7 +83,7 @@ class PodcastSettingsViewController: PCViewController {
     }
 
     func updateExistingSortcutData() {
-        SiriShortcutsManager.shared.voiceShortcutForPodcast(podcast: podcast, completion: { voiceShortcut in
+        SiriShortcutsManager.shared.voiceShortcut(for: podcast, completion: { voiceShortcut in
             self.existingShortcut = voiceShortcut
             DispatchQueue.main.async {
                 self.settingsTable.reloadData()
@@ -101,19 +101,21 @@ class PodcastSettingsViewController: PCViewController {
                 downloadedCount += 1
             }
         }
-        let optionPicker = OptionsPicker(title: downloadedCount > 0 ? nil : L10n.areYouSure)
-        let label = FeatureFlag.useFollowNaming.enabled ? L10n.unfollow : L10n.unsubscribe
-        let unsubscribeAction = OptionAction(label: label, icon: nil, action: { [weak self] in
+        let title: String
+        let message: String?
+        if downloadedCount > 0 {
+            title = L10n.downloadedFilesConf(downloadedCount)
+            message = L10n.downloadedFilesConfMessageNew
+        } else {
+            title = L10n.areYouSure
+            message = nil
+        }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: L10n.cancel, style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.unfollow, style: .destructive) { [weak self] _ in
             self?.performUnsubscribe()
         })
-        if downloadedCount > 0 {
-            unsubscribeAction.destructive = true
-            let message = FeatureFlag.useFollowNaming.enabled ? L10n.downloadedFilesConfMessageNew : L10n.downloadedFilesConfMessage
-            optionPicker.addDescriptiveActions(title: L10n.downloadedFilesConf(downloadedCount), message: message, icon: "option-alert", actions: [unsubscribeAction])
-        } else {
-            optionPicker.addAction(action: unsubscribeAction)
-        }
-        optionPicker.show(statusBarStyle: preferredStatusBarStyle)
+        present(alert, animated: true)
     }
 
     private func performUnsubscribe() {
@@ -123,7 +125,7 @@ class PodcastSettingsViewController: PCViewController {
     }
 
     @objc func podcastUpdated(_ notification: Notification) {
-        guard let podcastUuid = notification.object as? String, podcastUuid == podcast.uuid, let updatedPodcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid) else { return }
+        guard let podcastUuid = notification.object as? String, podcastUuid == podcast.uuid, let updatedPodcast = DataManager.shared.findPodcast(uuid: podcastUuid) else { return }
 
         podcast = updatedPodcast
     }

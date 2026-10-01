@@ -19,7 +19,7 @@ class ModifedHostingController<Content: View, Modifier: ViewModifier>: UIHosting
         }
     }
 
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
+    @MainActor dynamic required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 }
@@ -37,7 +37,7 @@ class ThemedHostingController<Content>: ModifedHostingController<Content, Themed
 
     private var background: KeyPath<Theme, Color>?
 
-    init(rootView: Content, theme: Theme = Theme.sharedTheme, background: KeyPath<Theme, Color>? = nil) {
+    init(rootView: Content, theme: Theme = Theme.shared, background: KeyPath<Theme, Color>? = nil) {
         self.background = background
         super.init(rootView: rootView, modifier: ThemedEnvironment(theme: theme))
     }
@@ -50,13 +50,13 @@ class ThemedHostingController<Content>: ModifedHostingController<Content, Themed
 
     @objc func themeDidChange() {
         if let background {
-            view.backgroundColor = UIColor(Theme.sharedTheme[keyPath: background])
+            view.backgroundColor = UIColor(Theme.shared[keyPath: background])
         } else {
             view.backgroundColor = .clear
         }
     }
 
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
+    @MainActor dynamic required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 }
@@ -79,9 +79,10 @@ class PCHostingController<Content>: ThemedHostingController<Content> where Conte
     }
 
     private func setupNavBar() {
+        guard !LiquidGlass.isEnabled else { return }
         configureNavBarFor(theme: Theme.preferredLightTheme(), traits: UITraitCollection(userInterfaceStyle: .light))
 
-        let preferredThemeWhenDark = Settings.shouldFollowSystemTheme() ? Theme.preferredDarkTheme() : Theme.preferredLightTheme()
+        let preferredThemeWhenDark = Settings.shouldFollowSystemTheme ? Theme.preferredDarkTheme() : Theme.preferredLightTheme()
         configureNavBarFor(theme: preferredThemeWhenDark, traits: UITraitCollection(userInterfaceStyle: .dark))
     }
 
@@ -115,7 +116,7 @@ struct ThemedEnvironment: ViewModifier {
 }
 
 extension View {
-    func setupDefaultEnvironment(theme: Theme = Theme.sharedTheme) -> some View {
+    func setupDefaultEnvironment(theme: Theme = Theme.shared) -> some View {
         self.modifier(ThemedEnvironment(theme: theme))
     }
 }

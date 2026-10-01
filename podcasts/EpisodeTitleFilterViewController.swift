@@ -5,7 +5,7 @@ import PocketCastsDataModel
 import PocketCastsUtils
 
 class EpisodeTitleFilterViewController: PCViewController {
-    private static let episodeCellId = "EpisodeTitleCellId"
+    private static let previewCellId = "EpisodePreviewCell"
     private static let headerCellId = "EpisodeTitleHeaderCellId"
 
     var filterToEdit: EpisodeFilter!
@@ -18,7 +18,7 @@ class EpisodeTitleFilterViewController: PCViewController {
             tableView.delegate = self
             tableView.translatesAutoresizingMaskIntoConstraints = false
             tableView.register(UITableViewCell.self, forCellReuseIdentifier: Self.headerCellId)
-            tableView.register(UINib(nibName: "EpisodePreviewCell", bundle: nil), forCellReuseIdentifier: FilterPreviewViewController.previewCellId)
+            tableView.register(UINib(nibName: "EpisodePreviewCell", bundle: nil), forCellReuseIdentifier: Self.previewCellId)
             tableView.rowHeight = UITableView.automaticDimension
             tableView.estimatedRowHeight = UITableView.automaticDimension
             tableView.keyboardDismissMode = .onDrag
@@ -28,7 +28,7 @@ class EpisodeTitleFilterViewController: PCViewController {
     private var footerView: ThemeableView! {
         didSet {
             footerView.translatesAutoresizingMaskIntoConstraints = false
-            footerView.backgroundColor = AppTheme.viewBackgroundColor()
+            footerView.backgroundColor = AppTheme.viewBackgroundColor
         }
     }
 
@@ -52,7 +52,7 @@ class EpisodeTitleFilterViewController: PCViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        view.backgroundColor = AppTheme.viewBackgroundColor()
+        view.backgroundColor = AppTheme.viewBackgroundColor
 
         setupNavBar()
         setupContent()
@@ -64,7 +64,7 @@ class EpisodeTitleFilterViewController: PCViewController {
     }
 
     private func setupNavBar() {
-        let backgroundColor = AppTheme.viewBackgroundColor()
+        let backgroundColor = AppTheme.viewBackgroundColor
         changeNavTint(
             titleColor: AppTheme.colorForStyle(.primaryText01),
             iconsColor: AppTheme.colorForStyle(.primaryIcon03),
@@ -77,17 +77,18 @@ class EpisodeTitleFilterViewController: PCViewController {
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationItem.largeTitleDisplayMode = .always
 
-        let appearance = UINavigationBarAppearance()
-        appearance.backgroundColor = AppTheme.colorForStyle(.primaryUi01)
-        appearance.largeTitleTextAttributes = [
-            NSAttributedString.Key.foregroundColor: AppTheme.colorForStyle(.primaryText01)
-        ]
-        appearance.titleTextAttributes = [
-            NSAttributedString.Key.foregroundColor: AppTheme.colorForStyle(.primaryText01)
-        ]
-        navigationController?.navigationBar.scrollEdgeAppearance = appearance
-        navigationController?.navigationBar.standardAppearance = appearance
-        navigationController?.navigationBar.sizeToFit()
+        if !LiquidGlass.isEnabled {
+            let appearance = UINavigationBarAppearance()
+            appearance.backgroundColor = AppTheme.colorForStyle(.primaryUi01)
+            appearance.largeTitleTextAttributes = [
+                NSAttributedString.Key.foregroundColor: AppTheme.colorForStyle(.primaryText01)
+            ]
+            appearance.titleTextAttributes = [
+                NSAttributedString.Key.foregroundColor: AppTheme.colorForStyle(.primaryText01)
+            ]
+            navigationController?.navigationBar.scrollEdgeAppearance = appearance
+            navigationController?.navigationBar.standardAppearance = appearance
+        }
     }
 
     private func setupContent() {
@@ -116,8 +117,6 @@ class EpisodeTitleFilterViewController: PCViewController {
             tableView.topAnchor.constraint(equalTo: view.topAnchor),
             tableView.bottomAnchor.constraint(equalTo: footerView.topAnchor)
         ])
-
-        view.layoutSubviews()
     }
 
     private func setupSaveButtonTitle() {
@@ -148,7 +147,7 @@ class EpisodeTitleFilterViewController: PCViewController {
     @objc private func saveTapped() {
         filterToEdit.titleSmartRuleApplied = !filterToEdit.filterEpisodeTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         filterToEdit.syncStatus = SyncStatus.notSynced.rawValue
-        DataManager.sharedManager.save(playlist: filterToEdit)
+        DataManager.shared.save(playlist: filterToEdit)
         NotificationCenter.postOnMainThread(notification: Constants.Notifications.playlistChanged, object: filterToEdit)
         navigationController?.popViewController(animated: true)
 
@@ -182,7 +181,7 @@ extension EpisodeTitleFilterViewController: UITableViewDataSource, UITableViewDe
                         self?.reloadEpisodes()
                     }
                 )
-                .environmentObject(Theme.sharedTheme)
+                .environmentObject(Theme.shared)
                 .frame(minHeight: 70.0, alignment: .leading)
             }
             .margins(.horizontal, 0)
@@ -190,7 +189,7 @@ extension EpisodeTitleFilterViewController: UITableViewDataSource, UITableViewDe
             return cell
         }
 
-        let cell = tableView.dequeueReusableCell(withIdentifier: FilterPreviewViewController.previewCellId, for: indexPath) as! EpisodePreviewCell
+        let cell = tableView.dequeueReusableCell(withIdentifier: Self.previewCellId, for: indexPath) as! EpisodePreviewCell
         cell.imageLeftPadding.constant = 16.0
         cell.style = .primaryUi01
         if let listEpisode = episodes[safe: indexPath.row] {

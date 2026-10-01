@@ -115,7 +115,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
         populateHeader()
         tableView.tableHeaderView = headerView
 
-        if let firstPodcastSubscription = firstPodcastSubscription, firstPodcastSubscription.autoRenewing, firstPodcastSubscription.platformIsWeb() {
+        if let firstPodcastSubscription, firstPodcastSubscription.autoRenewing, firstPodcastSubscription.platformIsWeb() {
             tableView.tableFooterView = footerView
         }
 
@@ -144,7 +144,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
         var sections = [TableSection]()
         if isSingleBundleSubscription() {
             sections.append(.manageSubscription)
-        } else if !isSingleBundleSubscription(), let firstPodcastSubscription = firstPodcastSubscription, firstPodcastSubscription.autoRenewing, firstPodcastSubscription.platformIsWeb() {
+        } else if !isSingleBundleSubscription(), let firstPodcastSubscription, firstPodcastSubscription.autoRenewing, firstPodcastSubscription.platformIsWeb() {
             sections.append(.manageSubscription)
         }
 
@@ -156,7 +156,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
     }
 
     private func rows(_ section: TableSection) -> [TableRow] {
-        guard let firstPodcastSubscription = firstPodcastSubscription else {
+        guard let firstPodcastSubscription else {
             return [TableRow]()
         }
 
@@ -216,7 +216,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
 
         case .bundlePodcast:
             let cell = tableView.dequeueReusableCell(withIdentifier: SupporterPodcastViewController.podcastCellId, for: indexPath) as! BundlePodcastCell
-            if var discoverPodcast = bundleCollection?.podcasts?[indexPath.row], let masterUuid = discoverPodcast.uuid, let userUuid = userUuidForMasterUuid(masterUuid) {
+            if var discoverPodcast = bundleCollection?.podcasts?[indexPath.row], let masterUuid = discoverPodcast.uuid, let userUuid = userUuid(forMasterUuid: masterUuid) {
                 discoverPodcast.uuid = userUuid
                 cell.populateFrom(discoverPodcast, showDisclosure: firstPodcastSubscription?.isExpired() ?? false)
             }
@@ -245,7 +245,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
         switch row {
         case .goToPodcast:
             if let podcastUserUuid = bundleSubscription.podcasts.first?.uuid {
-                NavigationManager.sharedManager.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcastUserUuid])
+                NavigationManager.shared.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcastUserUuid])
             }
         case .cancelSubscription:
             showCancelPrompt()
@@ -254,7 +254,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
         case .bundlePodcast:
             reloadRequired = true
             let podcastUserUuid = bundleSubscription.podcasts[indexPath.row].uuid
-            NavigationManager.sharedManager.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcastUserUuid])
+            NavigationManager.shared.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcastUserUuid])
         }
     }
 
@@ -263,9 +263,9 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
         switch section {
         case .bundlePodcasts:
             let headerFrame = CGRect(x: 0, y: 0, width: 0, height: 54)
-            if let firstPodcastSubscription = firstPodcastSubscription, !firstPodcastSubscription.isExpired() {
+            if let firstPodcastSubscription, !firstPodcastSubscription.isExpired() {
                 let podcastCount = bundleSubscription.podcasts.count.localized()
-                let subscribedPodcastCount = bundleSubscription.podcasts.filter { DataManager.sharedManager.findPodcast(uuid: $0.uuid) != nil }.count.localized()
+                let subscribedPodcastCount = bundleSubscription.podcasts.filter { DataManager.shared.findPodcast(uuid: $0.uuid) != nil }.count.localized()
                 let title = L10n.paidPodcastBundledSubscriptions(subscribedPodcastCount, podcastCount)
                 let rightBtnTitle = subscribedPodcastCount == podcastCount ? L10n.unsubscribeAll.localizedUppercase : L10n.subscribeAll.localizedUppercase
                 let rightBtnStyle: ThemeStyle = subscribedPodcastCount == podcastCount ? .support05 : .primaryInteractive01
@@ -298,7 +298,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
     // MARK: - Private helpers
 
     private func showCancelPrompt() {
-        guard let firstPodcastSubscription = bundleSubscription.podcasts.first, let firstPodcast = DataManager.sharedManager.findPodcast(uuid: firstPodcastSubscription.uuid, includeUnsubscribed: true) else { return }
+        guard let firstPodcastSubscription = bundleSubscription.podcasts.first, let firstPodcast = DataManager.shared.findPodcast(uuid: firstPodcastSubscription.uuid, includeUnsubscribed: true) else { return }
         let actionSheet = OptionsPicker(title: nil)
 
         let cancelAction = OptionAction(label: L10n.paidPodcastCancel, icon: nil) { [weak self] in
@@ -306,12 +306,12 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
         }
         cancelAction.destructive = true
 
-        let expiryDateStr = DateFormatHelper.sharedHelper.longLocalizedFormat(Date(timeIntervalSince1970: TimeInterval(firstPodcastSubscription.expiryDate)))
+        let expiryDateStr = DateFormatHelper.shared.longLocalizedFormat(Date(timeIntervalSince1970: TimeInterval(firstPodcastSubscription.expiryDate)))
         let deleteAfterExpiryMessage = isSingleBundleSubscription() ? L10n.paidPodcastCancelMsgSingular(expiryDateStr) : L10n.paidPodcastCancelMsgPlural(expiryDateStr)
         let message = firstPodcast.licensing == PodcastLicensing.deleteEpisodesAfterExpiry.rawValue ? deleteAfterExpiryMessage : L10n.paidPodcastCancelMsgRetainAccess(expiryDateStr)
         actionSheet.addDescriptiveActions(title: L10n.areYouSure, message: message, icon: "cancelsubscription-large", actions: [cancelAction])
 
-        actionSheet.show(statusBarStyle: preferredStatusBarStyle)
+        actionSheet.present(from: self)
     }
 
     private var progressAlert: ShiftyLoadingAlert?
@@ -320,7 +320,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
         progressAlert = ShiftyLoadingAlert(title: L10n.canceling)
         progressAlert?.showAlert(self, hasProgress: false, completion: nil)
         ApiServerHandler.shared.cancelPaidPodcastSubcription(bundleUuid: firstPodcastSubscription.bundleUuid) { [weak self] success in
-            guard let self = self else { return }
+            guard let self else { return }
 
             DispatchQueue.main.async {
                 self.progressAlert?.hideAlert(true)
@@ -335,7 +335,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
     }
 
     private func populateHeader() {
-        if isSingleBundleSubscription(), let uuid = bundleSubscription.podcasts.first?.uuid, let singlePodcast = DataManager.sharedManager.findPodcast(uuid: uuid, includeUnsubscribed: true) {
+        if isSingleBundleSubscription(), let uuid = bundleSubscription.podcasts.first?.uuid, let singlePodcast = DataManager.shared.findPodcast(uuid: uuid, includeUnsubscribed: true) {
             bundleTitleLabel.text = singlePodcast.title
             authorLabel.text = singlePodcast.author
 
@@ -368,7 +368,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
             nextPaymentLabel.isHidden = false
             frequencyLabel.text = SubscriptionHelper.readableSubscriptionFrequency(frequency: firstPodcastSubscription.frequency)
 
-            let expiryDateStr = DateFormatHelper.sharedHelper.longLocalizedFormat(Date(timeIntervalSince1970: TimeInterval(firstPodcastSubscription.expiryDate)))
+            let expiryDateStr = DateFormatHelper.shared.longLocalizedFormat(Date(timeIntervalSince1970: TimeInterval(firstPodcastSubscription.expiryDate)))
             nextPaymentLabel.text = L10n.nextPaymentFormat(expiryDateStr)
         } else {
             nextPaymentLabel.isHidden = true
@@ -376,7 +376,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
             cancelledLabel.isHidden = false
             cancelledOverlay.isHidden = false
 
-            if let firstPodcast = DataManager.sharedManager.findPodcast(uuid: firstPodcastSubscription.uuid, includeUnsubscribed: true) {
+            if let firstPodcast = DataManager.shared.findPodcast(uuid: firstPodcastSubscription.uuid, includeUnsubscribed: true) {
                 expiryLabel.isHidden = false
                 let expiryDate = Date(timeIntervalSince1970: firstPodcastSubscription.expiryDate)
                 expiryLabel.text = firstPodcast.displayableExpiryLanguage(expiryDate: expiryDate)
@@ -408,13 +408,13 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
     }
 
     private func updatePodcastColors(_ uuid: String) {
-        guard let podcast = DataManager.sharedManager.findPodcast(uuid: uuid) else {
+        guard let podcast = DataManager.shared.findPodcast(uuid: uuid) else {
             return
         }
         supportHeartView.setPodcastColor(podcast: podcast)
-        let podcastDarkColor = ColorManager.darkThemeTintForPodcast(podcast, defaultColor: AppTheme.extraContentBorderColor())
+        let podcastDarkColor = ColorManager.darkThemeTint(for: podcast, defaultColor: AppTheme.extraContentBorderColor)
         authorLabel.textColor = ThemeColor.podcastText02(podcastColor: podcastDarkColor)
-        let podcastBgColor = ColorManager.backgroundColorForPodcast(podcast)
+        let podcastBgColor = ColorManager.backgroundColor(for: podcast)
         headerView.backgroundColor = ThemeColor.podcastUi03(podcastColor: podcastBgColor)
     }
 
@@ -451,12 +451,12 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
     }
 
     private func subscribe(uuid: String) -> Bool {
-        guard let podcast = DataManager.sharedManager.findPodcast(uuid: uuid, includeUnsubscribed: true) else {
+        guard let podcast = DataManager.shared.findPodcast(uuid: uuid, includeUnsubscribed: true) else {
             return false
         }
         podcast.subscribed = 1
         podcast.syncStatus = SyncStatus.notSynced.rawValue
-        DataManager.sharedManager.save(podcast: podcast)
+        DataManager.shared.save(podcast: podcast)
         return true
     }
 
@@ -469,19 +469,19 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
         unsubscribeAction.destructive = true
         optionPicker.addDescriptiveActions(title: L10n.unsubscribe, message: L10n.paidPodcastUnsubscribeMsg, icon: "option-alert", actions: [unsubscribeAction])
 
-        optionPicker.show(statusBarStyle: preferredStatusBarStyle)
+        optionPicker.present(from: self)
     }
 
     private func unsubscribeAll() {
         bundleSubscription.podcasts.forEach { bundlePodcast in
-            if let podcast = DataManager.sharedManager.findPodcast(uuid: bundlePodcast.uuid) {
+            if let podcast = DataManager.shared.findPodcast(uuid: bundlePodcast.uuid) {
                 PodcastManager.shared.unsubscribe(podcast: podcast)
             }
         }
         tableView.reloadData()
     }
 
-    private func userUuidForMasterUuid(_ masterUuid: String) -> String? {
+    private func userUuid(forMasterUuid masterUuid: String) -> String? {
         guard let podcastPair = bundleSubscription.podcasts.first(where: { $0.masterUuid == masterUuid }) else {
             return nil
         }
@@ -491,7 +491,7 @@ class SupporterPodcastViewController: PCViewController, UITableViewDataSource, U
     private func loadBundleCollection(uuid: String) {
         let bundleUrl = ServerHelper.bundleUrl(bundleUuid: uuid)
         DiscoverServerHandler.shared.discoverPodcastCollection(source: bundleUrl.absoluteString, authenticated: nil, completion: { podcastCollection in
-            guard let podcastCollection = podcastCollection else { return }
+            guard let podcastCollection else { return }
             self.bundleCollection = podcastCollection
             DispatchQueue.main.async {
                 self.populateHeader()

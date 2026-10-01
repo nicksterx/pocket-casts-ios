@@ -1,9 +1,29 @@
 import Combine
 import Foundation
+import SwiftUI
 
 import PocketCastsDataModel
 import PocketCastsServer
 import PocketCastsUtils
+
+/// A tappable part of the header's category and author line. `Text` carries a tap as a link, so each
+/// one is addressed by a URL the header intercepts and never opens.
+enum PodcastHeaderLink: String {
+    case category
+    case author
+
+    private static let scheme = "pocketcasts-podcast-header"
+
+    var url: URL {
+        URL(string: "\(Self.scheme)://\(rawValue)")!
+    }
+
+    init?(url: URL) {
+        guard url.scheme == Self.scheme, let host = url.host else { return nil }
+
+        self.init(rawValue: host)
+    }
+}
 
 class PodcastHeaderViewModel: NSObject, ObservableObject {
 
@@ -31,7 +51,7 @@ class PodcastHeaderViewModel: NSObject, ObservableObject {
         .sink { [unowned self] notification in
             guard let podcastUuid = notification.object as? String,
                   podcastUuid == podcast.uuid,
-                  let podcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid, includeUnsubscribed: true)
+                  let podcast = DataManager.shared.findPodcast(uuid: podcastUuid, includeUnsubscribed: true)
             else {
                 return
             }
@@ -65,13 +85,32 @@ class PodcastHeaderViewModel: NSObject, ObservableObject {
         return String(substring).lowercased()
     }
 
-    var displayCategoryAndAuthor: AttributedString {
+    /// The category and author line, both tappable. The author is drawn in `networkTint` when it
+    /// leads somewhere — the podcast's network — and left as plain text when it doesn't.
+    func displayCategoryAndAuthor(networkTint: Color) -> AttributedString {
         let category = podcast.podcastCategory?.localized(seperatingWith: \.isNewline) ?? ""
-        var markdown = "[\(category)](http://pocketcasts.com)"
+        var result = AttributedString(category)
+        result.link = PodcastHeaderLink.category.url
         if let author = podcast.author {
-            markdown += " · \(author)"
+            var authorText = AttributedString(author)
+            if networkListId != nil {
+                authorText.link = PodcastHeaderLink.author.url
+                authorText.foregroundColor = networkTint
+            }
+            result += AttributedString(" · ") + authorText
         }
-        return (try? AttributedString(markdown: markdown)) ?? AttributedString("")
+        return result
+    }
+
+    /// The network the podcast belongs to, while the app shows networks at all.
+    var networkListId: String? {
+        FeatureFlag.networkDiscovery.enabled ? podcast.networkListId : nil
+    }
+
+    func networkTapped() {
+        guard let networkListId else { return }
+
+        delegate?.networkTapped(listId: networkListId)
     }
 
     var displayAuthor: String? {
@@ -107,12 +146,8 @@ class PodcastHeaderViewModel: NSObject, ObservableObject {
         return L10n.paidPodcastNextEpisodeFormat(estimatedDate)
     }
 
-    var isPodcastSubscribed: Bool {
-        return podcast.isSubscribed()
-    }
-
     func subscribeButtonTapped() {
-        guard let delegate = delegate else { return }
+        guard let delegate else { return }
 
         if podcast.isSubscribed() || isSubscribed {
             delegate.unsubscribe()
@@ -141,8 +176,15 @@ class PodcastHeaderViewModel: NSObject, ObservableObject {
         return podcast.podcastHTMLDescription ?? podcast.podcastDescription ?? ""
     }
 
-    func categoryTapped() {
-        delegate?.categoryTapped(firstCategory)
+    func headerLinkTapped(_ url: URL) {
+        switch PodcastHeaderLink(url: url) {
+        case .category:
+            delegate?.categoryTapped(firstCategory)
+        case .author:
+            networkTapped()
+        case nil:
+            delegate?.open(url: url)
+        }
     }
 
     func podcastArtworkTapped() {
@@ -160,7 +202,6 @@ extension PodcastHeaderViewModel: ExpandableLabelDelegate {
 
     func didExpandLabel(_ label: UIView) {
         delegate?.tableView().endUpdates()
-        delegate?.setDescriptionExpanded(expanded: true)
     }
 
     func willCollapseLabel(_ label: UIView) {
@@ -170,7 +211,6 @@ extension PodcastHeaderViewModel: ExpandableLabelDelegate {
 
     func didCollapseLabel(_ label: UIView) {
         delegate?.tableView().endUpdates()
-        delegate?.setDescriptionExpanded(expanded: false)
     }
 
     func linkTapped(url: URL) {

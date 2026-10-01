@@ -29,14 +29,14 @@ class WhatsNewLinkButton: ThemeableRoundedButton {
     }
 
     @objc private func openLink() {
-        guard let url = url else { return }
+        guard let url else { return }
 
-        NavigationManager.sharedManager.navigateTo(NavigationManager.openUrlInSafariVCKey, data: [NavigationManager.safariVCUrlKey: url.absoluteString])
+        NavigationManager.shared.navigateTo(NavigationManager.openUrlInSafariVCKey, data: [NavigationManager.safariVCUrlKey: url.absoluteString])
     }
 
     @objc private func navigateTo() {
-        guard let navigationKey = navigationKey else { return }
+        guard let navigationKey else { return }
         delegate?.closeWhatsNew()
-        NavigationManager.sharedManager.navigateTo(navigationKey, data: nil)
+        NavigationManager.shared.navigateTo(navigationKey, data: nil)
     }
 }

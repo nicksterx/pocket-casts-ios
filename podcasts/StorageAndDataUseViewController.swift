@@ -11,11 +11,12 @@ class StorageAndDataUseViewController: PCViewController, UITableViewDelegate, UI
             settingsTable.estimatedRowHeight = UITableView.automaticDimension
             settingsTable.estimatedSectionHeaderHeight = UITableView.automaticDimension
             settingsTable.sectionHeaderHeight = UITableView.automaticDimension
+            settingsTable.estimatedSectionFooterHeight = UITableView.automaticDimension
+            settingsTable.sectionFooterHeight = UITableView.automaticDimension
         }
     }
 
     private let usageSection = 0
-    private let dataUseSection = 1
     private let switchCellId = "SwitchCell"
     private let disclosureCellId = "DisclosureCell"
 
@@ -51,6 +52,27 @@ class StorageAndDataUseViewController: PCViewController, UITableViewDelegate, UI
         return SettingsTableHeader(frame: headerFrame, title: L10n.settingsStorageMobileData)
     }
 
+    func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
+        guard section == usageSection else { return nil }
+
+        let footer = UIView()
+        let label = ThemeableLabel()
+        label.style = .primaryText02
+        label.text = L10n.settingsStorageUsageFooter
+        label.numberOfLines = 0
+        label.font = UIFont.font(ofSize: 13, weight: .regular, scalingWith: .footnote)
+        label.adjustsFontForContentSizeCategory = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        footer.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: footer.topAnchor, constant: 12),
+            label.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -16),
+            label.bottomAnchor.constraint(equalTo: footer.bottomAnchor, constant: -12)
+        ])
+        return footer
+    }
+
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         if indexPath.section == usageSection {
             let cell = tableView.dequeueReusableCell(withIdentifier: disclosureCellId, for: indexPath) as! DisclosureCell
@@ -59,7 +81,7 @@ class StorageAndDataUseViewController: PCViewController, UITableViewDelegate, UI
 
             let fileSize = EpisodeManager.downloadSizeOfAllEpisodes()
             let sizeAsStr = SizeFormatter.shared.noDecimalFormat(bytes: Int64(fileSize))
-            cell.cellSecondaryLabel.text = sizeAsStr == "" ? SizeFormatter.shared.placeholder : sizeAsStr
+            cell.cellSecondaryLabel.text = sizeAsStr.isEmpty ? SizeFormatter.shared.placeholder : sizeAsStr
 
             return cell
         } else {

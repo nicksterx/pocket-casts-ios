@@ -52,7 +52,7 @@ class PlaylistCellViewModel: ObservableObject {
     static func gridArtworkItems<T>(
         from episodes: [T],
         limit: Int,
-        imageManager: ImageManager = .sharedManager,
+        imageManager: ImageManager = .shared,
         podcastUuid: (T) -> String
     ) -> [PlaylistArtworkView.ImageItem] {
         let distinctEpisodes = distinctPodcasts(from: episodes, limit: limit, podcastUuid: podcastUuid)
@@ -71,22 +71,20 @@ class PlaylistCellViewModel: ObservableObject {
     private let dataManager: DataManager
     private let imageManager: ImageManager
     private let episodesDataManager: EpisodesDataManager
-    private let episodeArtWork: EpisodeArtwork
 
     let displayType: DisplayType
 
     init(
         playlist: EpisodeFilter,
         displayType: DisplayType = .count,
-        dataManager: DataManager = .sharedManager,
-        imageManager: ImageManager = .sharedManager,
+        dataManager: DataManager = .shared,
+        imageManager: ImageManager = .shared,
         episodesDataManager: EpisodesDataManager = .init()
     ) {
         self.playlist = playlist
         self.displayType = displayType
         self.dataManager = dataManager
         self.imageManager = imageManager
-        self.episodeArtWork = .init(imageManager: imageManager)
         self.episodesDataManager = episodesDataManager
     }
 
@@ -158,8 +156,7 @@ class PlaylistCellViewModel: ObservableObject {
             for episode in episodes {
                 group.addTask {
                     if includingEpisodeArtwork,
-                       let imageUrl = try await ShowInfoCoordinator.shared.loadEpisodeArtworkUrl(podcastUuid: episode.episode.podcastUuid, episodeUuid: episode.episode.uuid),
-                       let url = URL(string: imageUrl) {
+                       let url = try await ShowInfoCoordinator.shared.loadEpisodeArtworkUrl(podcastUuid: episode.episode.podcastUuid, episodeUuid: episode.episode.uuid) {
                         return PlaylistArtworkView.ImageItem(id: episode.episode.uuid, url: url)
                     }
                     let url = self.imageManager.podcastUrl(imageSize: .grid, uuid: episode.episode.podcastUuid)

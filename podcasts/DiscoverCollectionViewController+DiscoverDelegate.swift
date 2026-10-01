@@ -1,5 +1,7 @@
 import PocketCastsServer
 import PocketCastsDataModel
+import EndOfYear
+import UIKit
 
 extension DiscoverCollectionViewController: DiscoverDelegate {
     func navigateTo(category: String) {
@@ -22,6 +24,29 @@ extension DiscoverCollectionViewController: DiscoverDelegate {
                 self?.showItemWith(identifier: listID)
             }
         }
+    }
+
+    /// Opens every network, as "Show all" on the networks row does.
+    func navigateToNetworks() {
+        if isViewLoaded {
+            showNetworks()
+        } else {
+            loadViewIfNeeded()
+            reloadData { [weak self] in
+                self?.showNetworks()
+            }
+        }
+    }
+
+    private func showNetworks() {
+        guard let discoverLayout, let items = discoverLayout.layout else { return }
+
+        let currentRegion = Settings.discoverRegion(discoverLayout: discoverLayout)
+        guard let item = items.first(where: { $0.type == "lists_list" && $0.regions.contains(currentRegion) && $0.cellType() == .networksList }) else { return }
+
+        let model = DiscoverNetworksListModel()
+        model.registerDiscoverDelegate(self)
+        model.showAll(item: item)
     }
 
     func invalidate(item: PocketCastsServer.DiscoverItem) {
@@ -108,11 +133,11 @@ extension DiscoverCollectionViewController: DiscoverDelegate {
             Analytics.track(.discoverShowAllTapped, properties: ["list_id": item.inferredListId])
         }
 
-        if item.expandedStyle == "descriptive_list" || item.expandedStyle == "grid" {
+        if item.expandedStyle == "descriptive_list" || item.expandedStyle == "grid" || item.expandedStyle == "network_grid" {
             let collectionListVC = ExpandedCollectionViewController(item: item, podcasts: podcasts)
             collectionListVC.podcastCollection = podcastCollection
             collectionListVC.registerDiscoverDelegate(self)
-            collectionListVC.cellStyle = (item.expandedStyle == "descriptive_list") ? CollectionCellStyle.descriptive_list : CollectionCellStyle.grid
+            collectionListVC.cellStyle = (item.expandedStyle == "descriptive_list") ? CollectionCellStyle.descriptiveList : CollectionCellStyle.grid
             navController()?.pushViewController(collectionListVC, animated: true)
         } else { // item == expandedStylw == "plain_list" || item.expandedStyle == "ranked_list"
             let source = replaceRegionCode(string: item.source ?? "")
@@ -126,7 +151,7 @@ extension DiscoverCollectionViewController: DiscoverDelegate {
     }
 
     func showExpanded(item: DiscoverItem, episodes: [DiscoverEpisode], podcastCollection: PodcastCollection?) {
-        guard let podcastCollection = podcastCollection else { return }
+        guard let podcastCollection else { return }
 
         if let listId = item.uuid {
             AnalyticsHelper.listShowAllTapped(listId: listId, dateTime: podcastCollection.datetime)
@@ -165,7 +190,7 @@ extension DiscoverCollectionViewController: DiscoverDelegate {
 
     func isSubscribed(podcast: DiscoverPodcast) -> Bool {
         if let uuid = podcast.uuid {
-            if let _ = DataManager.sharedManager.findPodcast(uuid: uuid) {
+            if let _ = DataManager.shared.findPodcast(uuid: uuid) {
                 return true
             }
         }

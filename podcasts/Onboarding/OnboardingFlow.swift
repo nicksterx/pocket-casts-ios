@@ -1,7 +1,8 @@
 import Foundation
 import PocketCastsUtils
+import UIKit
 
-struct OnboardingFlow: AnalyticsSourceProvider {
+struct OnboardingFlow {
     typealias Context = [String: Any]
 
     static var shared = OnboardingFlow()
@@ -9,12 +10,27 @@ struct OnboardingFlow: AnalyticsSourceProvider {
     private(set) var currentFlow: Flow = .none
     private(set) var source: PlusUpgradeViewSource? = nil
 
+    /// Where the flow started, tracked as `flow_source`. Unlike `source`, `updateAnalyticsSource` doesn't change it.
+    private(set) var originSource: PlusUpgradeViewSource? = nil
+
+    /// Gates the notifications prompt for non-onboarding flows (e.g. EAC): shown only after account
+    /// creation, not on "Not Now". Cleared on `begin()` and `reset()`.
+    private(set) var didCreateAccount = false
+
     private(set) var accountCreated: ((Bool)->())?
+
+    mutating func markAccountCreated() {
+        didCreateAccount = true
+    }
 
     mutating func begin(flow: Flow, in controller: UIViewController? = nil, source: PlusUpgradeViewSource, context: Context? = nil, customTitle: String? = nil, accountCreated: ((Bool)->())? = nil) -> UIViewController {
         self.currentFlow = flow
         self.source = source
+        self.originSource = source
         self.accountCreated = accountCreated
+        // Also cleared here (not just `reset()`, which is only reached conditionally) to keep the
+        // flag scoped to one flow. Account creation always happens after `begin()`, so nothing is lost.
+        self.didCreateAccount = false
 
         let navigationController = controller as? UINavigationController
 
@@ -31,36 +47,20 @@ struct OnboardingFlow: AnalyticsSourceProvider {
         case .plusAccountUpgrade:
             self.source = source
             let product = context?["product"] as? ProductInfo
-            if FeatureFlag.newOnboardingUpgrade.enabled {
-                flowController = UpgradeAccountViewModel.make(in: controller,
-                                                              flowSource: .accountScreen,
-                                                              viewSource: source,
-                                                              plan: product?.plan ?? .plus,
-                                                              frequency: product?.frequency ?? .yearly)
-            } else {
-                flowController = PlusPurchaseModel.make(in: controller,
-                                                        plan: product?.plan ?? .plus,
-                                                        selectedPrice: product?.frequency ?? .yearly,
-                                                        customTitle: customTitle)
-            }
+            flowController = UpgradeAccountViewModel.make(in: controller,
+                                                          flowSource: .accountScreen,
+                                                          viewSource: source,
+                                                          plan: product?.plan ?? .plus,
+                                                          frequency: product?.frequency ?? .yearly)
 
         case .patronAccountUpgrade:
             self.source = source
-            if FeatureFlag.newOnboardingUpgrade.enabled {
-                flowController = UpgradeAccountViewModel.make(in: controller,
-                                                              flowSource: .upsell,
-                                                              viewSource: source,
-                                                              plan: .patron,
-                                                              frequency: .yearly,
-                                                              )
-            } else {
-                let config = PlusLandingViewModel.Config(products: [.patron], displayProduct: .init(plan: .patron, frequency: .yearly))
-                flowController = PlusLandingViewModel.make(in: navigationController,
-                                                           from: .upsell,
-                                                           viewSource: source,
-                                                           config: config,
-                                                           customTitle: customTitle)
-            }
+            flowController = UpgradeAccountViewModel.make(in: controller,
+                                                          flowSource: .upsell,
+                                                          viewSource: source,
+                                                          plan: .patron,
+                                                          frequency: .yearly,
+                                                          )
 
         case .plusAccountUpgradeNeedsLogin:
             flowController = LoginCoordinator.make(in: navigationController, continuePurchasing: .init(plan: .plus, frequency: .yearly))
@@ -79,30 +79,30 @@ struct OnboardingFlow: AnalyticsSourceProvider {
 
     private func upgradeController(in controller: UINavigationController?, viewSource: PlusUpgradeViewSource, context: Context?, customTitle: String? = nil) -> UIViewController {
         let product = context?["product"] as? ProductInfo
-        if FeatureFlag.newOnboardingUpgrade.enabled {
-            return UpgradeAccountViewModel.make(in: controller,
-                                                flowSource: .upsell,
-                                                viewSource: viewSource,
-                                                plan: product?.plan ?? .plus,
-                                                frequency: product?.frequency ?? .yearly)
-        } else {
-            return PlusLandingViewModel.make(in: controller,
-                                             from: .upsell,
-                                             viewSource: viewSource,
-                                             config: .init(displayProduct: product),
-                                             customTitle: customTitle)
-        }
+        return UpgradeAccountViewModel.make(in: controller,
+                                            flowSource: .upsell,
+                                            viewSource: viewSource,
+                                            plan: product?.plan ?? .plus,
+                                            frequency: product?.frequency ?? .yearly)
     }
 
     /// Resets the internal flow state to none and clears any analytics sources
     mutating func reset() {
-        if (currentFlow == .initialOnboarding) || (currentFlow == .encourageAccountCreation) {
-            NavigationManager.sharedManager.showNotificationsPermissionsModal()
+        if Self.shouldShowNotificationsPermissions(didCreateAccount: didCreateAccount, flow: currentFlow) {
+            NavigationManager.shared.showNotificationsPermissionsModal()
         }
         source = .unknown
+        originSource = nil
         currentFlow = .none
+        didCreateAccount = false
 
         NotificationCenter.default.post(name: .onboardingFlowDidDismiss, object: nil)
+    }
+
+    /// Whether dismissing this session should chain into the notifications prompt: whenever an account
+    /// was created (any flow), plus the first-run prompt after initial onboarding.
+    static func shouldShowNotificationsPermissions(didCreateAccount: Bool, flow: Flow) -> Bool {
+        didCreateAccount || flow == .initialOnboarding
     }
 
     /// Updates the source passed for analytics
@@ -117,6 +117,10 @@ struct OnboardingFlow: AnalyticsSourceProvider {
         // Append the source, only if it's set because not every event needs a source
         if let source {
             defaultProperties["source"] = source.rawValue
+        }
+
+        if let originSource {
+            defaultProperties["flow_source"] = originSource.rawValue
         }
 
         let mergedProperties = defaultProperties.merging(properties ?? [:]) { current, _ in current }
@@ -172,6 +176,9 @@ struct OnboardingFlow: AnalyticsSourceProvider {
 
         case encourageAccountCreation = "encourage_account_creation"
 
+        /// When approving a tv device login
+        case deviceApproval = "device_approval"
+
         var analyticsDescription: String { rawValue }
 
         /// If after a successful sign in or sign up the onboarding flow
@@ -195,9 +202,5 @@ struct OnboardingFlow: AnalyticsSourceProvider {
                 false
             }
         }
-    }
-
-    var analyticsSource: AnalyticsSource {
-        .onboarding
     }
 }

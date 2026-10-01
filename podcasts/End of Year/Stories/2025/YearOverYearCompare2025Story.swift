@@ -2,6 +2,7 @@ import SwiftUI
 import PocketCastsServer
 import PocketCastsDataModel
 import Lottie
+import EndOfYear
 
 struct YearOverYearCompare2025Story: ShareableStory {
     @Environment(\.renderForSharing) var renderForSharing: Bool
@@ -105,19 +106,6 @@ struct YearOverYearCompare2025Story: ShareableStory {
         }
     }
 
-    private func fontSizes() -> (Double, Double) {
-        let big: Double = 128
-        let small: Double = 108
-        switch comparison {
-        case .down:
-            return (big, small)
-        case .up:
-            return (small, big)
-        case .same:
-            return (small, big)
-        }
-    }
-
     private var headerContent: HeaderContent {
         let maximumDifference: Double = 5
         let formatStyle = FloatingPointFormatStyle<Double>.Percent().precision(.fractionLength(0))
@@ -161,7 +149,7 @@ struct YearOverYearCompare2025Story: ShareableStory {
     }
 }
 
-final private class LottieTextProvider: LegacyAnimationTextProvider, Equatable {
+private final class LottieTextProvider: LegacyAnimationTextProvider, Equatable {
     private let dict: [String: String]
     private let prevYear: Int
     private let currentYear: Int

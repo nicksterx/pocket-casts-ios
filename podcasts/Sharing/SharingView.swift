@@ -1,6 +1,7 @@
 import SwiftUI
 import PocketCastsDataModel
 import PocketCastsUtils
+import UniformTypeIdentifiers
 
 class ClipTime: ObservableObject {
     @Published var start: TimeInterval
@@ -45,6 +46,7 @@ struct SharingView: View {
 
     @State private var shareable: Shareable
     @State private var isExporting: Bool = false
+    @State private var episodeArtworkUrl: URL?
 
     @ObservedObject var clipTime: ClipTime
 
@@ -78,7 +80,7 @@ struct SharingView: View {
             SharingFooterView(clipTime: clipTime, option: $shareable.option, isExporting: $isExporting, destinations: destinations, style: shareable.style, clipUUID: clipUUID, source: source)
         }
         .onAppear {
-            var properties = [:]
+            var properties: [String: Sendable] = [:]
             let type: String
 
             switch shareable.option {
@@ -105,6 +107,9 @@ struct SharingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(Color.white)
+        .task {
+            episodeArtworkUrl = await shareable.option.loadEpisodeArtworkUrl()
+        }
     }
 
     @ViewBuilder var title: some View {
@@ -170,7 +175,7 @@ struct SharingView: View {
                 case .increment:
                     nextIndex = currentIndex.advanced(by: 1) % styles.count
                 case .decrement:
-                    nextIndex = currentIndex.advanced(by: -1) % styles.count
+                    nextIndex = (currentIndex - 1 + styles.count) % styles.count
                 default:
                     nextIndex = nil
                 }
@@ -181,7 +186,7 @@ struct SharingView: View {
     }
 
     @ViewBuilder func image(style: ShareImageStyle, containerHeight: CGFloat) -> some View {
-        ShareImageView(info: shareable.option.imageInfo, style: style, angle: .constant(0))
+        ShareImageView(info: shareable.option.imageInfo(episodeArtworkUrl: episodeArtworkUrl), style: style, angle: .constant(0))
             .frame(width: style.previewSize.width, height: style.previewSize.height)
             .fixedSize()
             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -189,15 +194,6 @@ struct SharingView: View {
             .id(style)
             .scaleEffect((containerHeight - Constants.tabViewPadding) / ShareImageStyle.large.previewSize.height)
 	}
-
-    private func shareItems(style: ShareImageStyle) -> [Shareable] {
-        var media = shareable
-        media.shareType = style == .audio ? .audio : .video
-        var image = shareable
-        image.shareType = .image
-
-        return [media, (style != .audio ? image : nil)].compactMap { $0 }
-    }
 }
 
 #Preview {

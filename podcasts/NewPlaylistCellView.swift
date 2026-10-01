@@ -5,8 +5,6 @@ struct NewPlaylistCellView: View {
     @EnvironmentObject var theme: Theme
     @ObservedObject var viewModel: NewPlaylistCellViewModel
 
-    @State private var refreshToken = UUID()
-
     @ScaledMetric(relativeTo: .largeTitle) private var imageSize: CGFloat = 56
 
     private var title: String {
@@ -39,7 +37,7 @@ struct NewPlaylistCellView: View {
     }
 
     var body: some View {
-        HStack(spacing: 16.0) {
+        HStack(spacing: 12.0) {
             if viewModel.displayType == .addNew {
                 ZStack {
                     Rectangle()
@@ -124,5 +122,5 @@ struct NewPlaylistCellView: View {
         }
     }
     return PreviewWrapper()
-        .environmentObject(Theme.sharedTheme)
+        .environmentObject(Theme.shared)
 }

@@ -1,6 +1,7 @@
 import Foundation
 import PocketCastsDataModel
 import SwiftUI
+import PocketCastsUtils
 
 struct PodcastBlurHeaderView: View {
 
@@ -76,22 +77,41 @@ struct PodcastHeaderView: View {
                 .clipped()
             PodcastDetailsTabView(delegate: viewModel.delegate)
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 16)
+    }
+
+    func makeText() -> Text {
+        var output = Text(viewModel.displayCategoryAndAuthor(networkTint: networkTint))
+        if FeatureFlag.showExplicitBadges.enabled, viewModel.podcast.isExplicit {
+            output = output + ExplicitBadgeHelper.inlineTitle(" ·", isExplicit: true, theme: theme.activeTheme)
+        }
+        return output
     }
 
     private var podcastCategory: some View {
         VStack {
-            Text(viewModel.displayCategoryAndAuthor)
+                makeText()
                 .font(.footnote)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(theme.primaryText01)
             .tint(theme.primaryText01)
             .environment(\.openURL, OpenURLAction { url in
-                viewModel.categoryTapped()
+                viewModel.headerLinkTapped(url)
                 return .handled
             })
         }
+    }
+
+    /// The podcast's own colour, which is what marks the author as leading to its network.
+    private var networkTint: Color {
+        Color(viewModel.podcast.iconTintColor(for: theme.activeTheme))
+    }
+
+    /// The details row's author is drawn in `networkTint` when it leads to the podcast's network,
+    /// the same place the header's author does, and left as plain text when it doesn't.
+    private var authorTint: Color? {
+        viewModel.networkListId == nil ? nil : networkTint
     }
 
     var topMarginForTitle: CGFloat {
@@ -106,9 +126,9 @@ struct PodcastHeaderView: View {
     }
 
     @ScaledMetric(relativeTo: .body) private var titleBottomMargin = 16
-    @ScaledMetric(relativeTo: .title2) private var itemMargin = 24
-    @ScaledMetric(relativeTo: .title2) private var iconSize = 24
-    @ScaledMetric(relativeTo: .title2) private var iconRounding = 32
+    @ScaledMetric(relativeTo: .largeTitle) private var itemMargin = 24
+    @ScaledMetric(relativeTo: .largeTitle) private var iconSize = 24
+    @ScaledMetric(relativeTo: .largeTitle) private var iconRounding = 32
 
     private var podcastTitle: some View {
         HStack(spacing: 0) {
@@ -149,7 +169,7 @@ struct PodcastHeaderView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .background(theme.support02)
-                        .tint(theme.primaryUi01)
+                        .foregroundStyle(theme.primaryUi01)
                         .frame(width: iconSize, height: iconSize)
                         .clipShape(Circle())
                         .opacity(viewModel.isSubscribed ? 1 : 0)
@@ -161,8 +181,9 @@ struct PodcastHeaderView: View {
                     .opacity(viewModel.isSubscribed ? 0 : 1)
                 )
                 .clipped()
-
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(viewModel.isSubscribed ? L10n.unfollow : L10n.follow)
     }
 
     private var fundingButton: some View {
@@ -178,13 +199,13 @@ struct PodcastHeaderView: View {
                             .inset(by: 0.5)
                             .stroke(theme.primaryUi05, lineWidth: 1)
                     )
-
             } else {
                 // Subscribed state - compact button with other actions
                 fundingImage(width: iconSize, height: iconSize, padding: 8.0)
             }
         }
         .accessibilityLabel(L10n.funding)
+        .buttonStyle(.plain)
     }
 
     private func fundingImage(width: CGFloat, height: CGFloat, padding: CGFloat) -> some View {
@@ -230,10 +251,12 @@ struct PodcastHeaderView: View {
             Image(imageName)
                 .renderingMode(.template)
                 .resizable()
+                .aspectRatio(contentMode: .fit)
                 .frame(width: iconSize, height: iconSize)
                 .padding(8)
                 .foregroundStyle(theme.primaryIcon03)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(title)
     }
 
@@ -250,16 +273,18 @@ struct PodcastHeaderView: View {
     private var podcastDetails: some View {
         VStack(alignment: .leading) {
             if let displayAuthor = viewModel.displayAuthor {
-                infoLabel(displayAuthor, imageName: "podcast-author", action: {})
+                infoLabel(displayAuthor, imageName: "podcast-author", linkTint: authorTint, action: authorTint == nil ? nil : { viewModel.networkTapped() })
             }
             if let displayWebsite = viewModel.displayWebsite {
-                infoLabel(displayWebsite, imageName: "podcast-link", isLink: true, action: { viewModel.websiteLinkTapped() })
+                infoLabel(displayWebsite, imageName: "podcast-link", linkTint: networkTint) {
+                    viewModel.websiteLinkTapped()
+                }
             }
             if let displayFrequency = viewModel.displayFrequency {
-                infoLabel(displayFrequency, imageName: "podcast-schedule", action: {})
+                infoLabel(displayFrequency, imageName: "podcast-schedule")
             }
             if let displayNextEpisodeDate = viewModel.displayNextEpisodeDate {
-                infoLabel(displayNextEpisodeDate, imageName: "podcast-nextepisode", action: {})
+                infoLabel(displayNextEpisodeDate, imageName: "podcast-nextepisode")
             }
         }
         .padding()
@@ -271,55 +296,27 @@ struct PodcastHeaderView: View {
         )
     }
 
-    private func infoLabel(_ label: String, imageName: String, isLink: Bool = false, action: @escaping ()->()) -> some View {
+    /// A row of the details box. `linkTint` colours the text and makes the row tappable; a row
+    /// without one is plain text.
+    private func infoLabel(_ label: String, imageName: String, linkTint: Color? = nil, action: (() -> Void)? = nil) -> some View {
         HStack {
             Image(imageName)
                 .resizable()
                 .frame(width: iconSize, height: iconSize)
                 .foregroundStyle(theme.primaryIcon02)
             Text(label)
-                .foregroundStyle(isLink ? theme.support05 : theme.primaryText01)
-                .onTapGesture {
-                    action()
-                }
+                .foregroundStyle(linkTint ?? theme.primaryText01)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
         }
-    }
-}
-
-extension AnyTransition {
-    static var collapse: AnyTransition { get {
-        AnyTransition.modifier(
-            active: ShapeClipModifier(shape: CollapseShape(pct: 1)),
-            identity: ShapeClipModifier(shape: CollapseShape(pct: 0)))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            action?()
         }
-    }
-}
-
-struct ShapeClipModifier<S: Shape>: ViewModifier {
-    let shape: S
-
-    func body(content: Content) -> some View {
-        content.clipShape(shape)
-    }
-}
-
-struct CollapseShape: Shape {
-    var pct: CGFloat
-
-    var animatableData: CGFloat {
-        get { pct }
-        set { pct = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-
-        path.addRect(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: (1.0-pct) * rect.height))
-
-        return path
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(linkTint == nil ? [] : .isButton)
+        .allowsHitTesting(action != nil)
     }
 }
 
@@ -335,16 +332,23 @@ struct PodcastHeaderView_Previews: PreviewProvider {
             podcast.estimatedNextEpisode = Date.now
             podcast.podcastHTMLDescription = "<p>Test description</p>"
             podcast.fundingURL = "https://www.pocketcasts.com"
+            podcast.networkListId = "cdb75bc0-9f5a-4217-b1ca-f573821a7913"
             return podcast
+        }
+
+        /// Expanded, which is the only state that shows the category and author line.
+        static func makeViewModel() -> PodcastHeaderViewModel {
+            let viewModel = PodcastHeaderViewModel(podcast: makePodcast())
+            viewModel.isExpanded = true
+            return viewModel
         }
 
         var body: some View {
             VStack() {
-                PodcastHeaderView(viewModel: PodcastHeaderViewModel(podcast: Self.makePodcast()))
+                PodcastHeaderView(viewModel: Self.makeViewModel())
                 Spacer()
             }
             .background(theme.primaryUi02)
-            .frame(maxHeight: 400)
         }
     }
     static var previews: some View {

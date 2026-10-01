@@ -1,6 +1,7 @@
 import SwiftUI
 import PocketCastsServer
 import PocketCastsDataModel
+import EndOfYear
 import PocketCastsUtils
 
 enum EndOfYearPresentationSource: String {
@@ -54,11 +55,6 @@ struct EndOfYear {
             return true
         }
         return false
-    }
-
-    static var shouldShowBadge: Bool {
-        guard let year = currentYear.year else { return false }
-        return Settings.showBadgeForEndOfYear(year)
     }
 
     // Eligibility checker to manage the `isEligible` state
@@ -205,6 +201,7 @@ struct EndOfYear {
         Analytics.track(.endOfYearStoriesShown, properties: ["source": source.rawValue, "current_year": EndOfYear.currentYear.literalValue])
     }
 
+    @MainActor
     static func share(assets: [Any], model: StoriesModel, storyIdentifier: String = "unknown", onDismiss: (() -> Void)? = nil) {
         let presenter = SceneHelper.rootViewController()
 
@@ -347,7 +344,7 @@ extension EndOfYear {
             ]
 
             self.notifications = notifications.map {
-                notificationCenter.addObserver(forName: $0, object: nil, queue: .main) { [weak self] notification in
+                notificationCenter.addObserver(forName: $0, object: nil, queue: .main) { [weak self] _ in
                     self?.update()
                 }
             }
@@ -359,7 +356,7 @@ extension EndOfYear {
         }
 
         private func update() {
-            isEligible = DataManager.sharedManager.isEligibleForEndOfYearStories(in: year)
+            isEligible = DataManager.shared.isEligibleForEndOfYearStories(in: year)
 
             // Let others know this changed
             if isEligible {

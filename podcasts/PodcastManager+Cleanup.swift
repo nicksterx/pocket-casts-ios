@@ -14,11 +14,11 @@ extension PodcastManager {
         // we don't delete podcasts which have any episodes in a playlist or Up Next
         if dataManager.playlistContainsPodcast(podcastUuid: podcast.uuid) { return }
 
-        let interactedEpisodes = dataManager.allEpisodesForPodcast(id: podcast.id).filter { $0.userHasInteractedWithEpisode() }
+        let interactedEpisodes = dataManager.allEpisodes(forPodcastId: podcast.id).filter { $0.userHasInteractedWithEpisode() }
 
         // we can safely delete podcasts where the user hasn't interacted with any of the episodes
-        if interactedEpisodes.count == 0 {
-            let episodes = dataManager.allEpisodesForPodcast(id: podcast.id)
+        if interactedEpisodes.isEmpty {
+            let episodes = dataManager.allEpisodes(forPodcastId: podcast.id)
             await downloadManager.cancelTasks(for: episodes)
 
             // Delete all the episodes for the podcast that we're deleting
@@ -29,7 +29,7 @@ extension PodcastManager {
 
     func deleteGhostEpisodesIfNeeded() {
         let episodes = dataManager.findGhostEpisodes()
-        guard episodes.count != 0 else {
+        guard !episodes.isEmpty else {
             return
         }
 
@@ -40,7 +40,7 @@ extension PodcastManager {
 
         episodes.forEach { episode in
             guard
-                episode.uuid.count != 0,
+                !episode.uuid.isEmpty,
                 episode.userHasInteractedWithEpisode() == false
             else {
                 return
@@ -50,8 +50,47 @@ extension PodcastManager {
             deleted_count += 1
         }
 
-        DataManager.sharedManager.deleteGhostsEpisodes(uuids: uuids)
+        DataManager.shared.deleteGhostsEpisodes(uuids: uuids)
         FileLog.shared.addMessage("Deleted \(deleted_count) Ghost Episodes")
+    }
+
+    func deleteOrphanedEpisodesIfNeeded() {
+        let orphans = dataManager.findOrphanedEpisodes()
+        guard !orphans.isEmpty else {
+            return
+        }
+
+        FileLog.shared.addMessage("Found \(orphans.count) Orphaned Episodes")
+
+        var deletedCount = 0
+
+        for (uuid, orphanRows) in Dictionary(grouping: orphans, by: \.uuid) {
+            // Only act when there's exactly one unambiguous "live" row (valid podcast_id) to reconcile
+            // against; anything else is a different/rarer shape of duplicate and is left alone.
+            let liveRows = dataManager.findEpisodesWhere(customWhere: "uuid = ? AND podcast_id IN (SELECT id FROM \(DataManager.podcastTableName))", arguments: [uuid])
+            guard liveRows.count == 1, let live = liveRows.first else {
+                continue
+            }
+
+            let survivor = orphanRows
+                .filter { $0.userHasInteractedWithEpisode() }
+                .max { ($0.lastPlaybackInteractionDate ?? $0.addedDate ?? .distantPast) < ($1.lastPlaybackInteractionDate ?? $1.addedDate ?? .distantPast) }
+
+            if let survivor {
+                // The orphan already holds the real state (podcastUuid is still correct, only
+                // podcast_id is dangling), so repoint it at the real podcast instead of copying
+                // its fields onto the stale, pristine "live" row. Repoint + delete happen in one
+                // write so a crash mid-migration can't commit one without the other.
+                let otherOrphanIds = orphanRows.filter { $0.id != survivor.id }.map(\.id)
+                dataManager.reconcileOrphanedEpisode(survivorId: survivor.id, realPodcastId: live.podcast_id, idsToDelete: [live.id] + otherOrphanIds)
+                deletedCount += 1 + otherOrphanIds.count
+            } else {
+                dataManager.deleteOrphanedEpisodes(ids: orphanRows.map(\.id))
+                deletedCount += orphanRows.count
+            }
+        }
+
+        FileLog.shared.addMessage("Deleted \(deletedCount) Orphaned Episodes")
     }
 
     func checkForUnusedPodcasts() async {
@@ -65,10 +104,10 @@ extension PodcastManager {
         let allPaidPodcasts = dataManager.allPaidPodcasts()
 
         let licenseRestrictedPodcasts = allPaidPodcasts.filter { $0.licensing == PodcastLicensing.deleteEpisodesAfterExpiry.rawValue }
-        if licenseRestrictedPodcasts.count == 0 { return }
+        if licenseRestrictedPodcasts.isEmpty { return }
 
         for podcast in licenseRestrictedPodcasts {
-            guard let subscription = SubscriptionHelper.subscriptionForPodcast(uuid: podcast.uuid) else { continue }
+            guard let subscription = SubscriptionHelper.subscription(forPodcastUuid: podcast.uuid) else { continue }
 
             let expiryDate = Date(timeIntervalSince1970: subscription.expiryDate)
             if expiryDate.timeIntervalSinceNow < 0, !subscription.autoRenewing {

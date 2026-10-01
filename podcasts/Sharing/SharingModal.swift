@@ -1,7 +1,10 @@
 import PocketCastsDataModel
 import SwiftUI
 import PocketCastsUtils
+import EndOfYear
+import CoreMedia
 
+@MainActor
 enum SharingModal {
 
     /// Share options including which type of content will be shared
@@ -86,7 +89,7 @@ enum SharingModal {
         let optionPicker = OptionsPicker(title: L10n.share.uppercased(), themeOverride: .dark, colors: colors)
 
         let timeInterval: Double
-        if PlaybackManager.shared.currentEpisode()?.uuid == episode?.uuid {
+        if PlaybackManager.shared.currentEpisode?.uuid == episode?.uuid {
             timeInterval = PlaybackManager.shared.currentTime()
         } else {
             timeInterval = episode?.playedUpTo ?? 0
@@ -104,7 +107,7 @@ enum SharingModal {
             optionPicker.addAction(action: fileAction)
         }
 
-        optionPicker.show(statusBarStyle: AppTheme.defaultStatusBarStyle())
+        optionPicker.present(from: viewController)
     }
 
     static func show(option: Option, from source: AnalyticsSource, in viewController: UIViewController) {
@@ -180,12 +183,12 @@ extension SharingModal.Option {
         }
     }
 
-    var imageInfo: ShareImageInfo {
+    func imageInfo(episodeArtworkUrl: URL? = nil) -> ShareImageInfo {
         let gradient = Gradient(colors: [
-            Color(uiColor: ColorManager.lightThemeTintForPodcast(podcast)),
-            Color(uiColor: UIColor.calculateColor(orgColor: UIColor.black, overlayColor: ColorManager.lightThemeTintForPodcast(podcast).withAlphaComponent(0.8))),
+            Color(uiColor: ColorManager.lightThemeTint(for: podcast)),
+            Color(uiColor: UIColor.calculateColor(orgColor: UIColor.black, overlayColor: ColorManager.lightThemeTint(for: podcast).withAlphaComponent(0.8))),
         ])
-        let artwork = ImageManager.sharedManager.podcastUrl(imageSize: .page, uuid: podcast.uuid)
+        let artwork = episodeArtworkUrl ?? ImageManager.shared.podcastUrl(imageSize: .page, uuid: podcast.uuid)
         let imageInfo = ShareImageInfo(name: name ?? "",
                                        title: title ?? "",
                                        description: description ?? "",
@@ -194,14 +197,24 @@ extension SharingModal.Option {
         return imageInfo
     }
 
+    func loadEpisodeArtworkUrl() async -> URL? {
+        guard Settings.loadEmbeddedImages, let episode else { return nil }
+        return try? await ShowInfoCoordinator.shared.loadEpisodeArtworkUrl(
+            podcastUuid: episode.podcastUuid,
+            episodeUuid: episode.uuid
+        )
+    }
+
     @MainActor
     func shareData(style: ShareImageStyle, destination: ShareDestination, clipUUID: String, progress: Binding<Float?>) async throws -> [ActivityItemSourceItem] {
         let url = URL(string: shareURL) as NSURL?
+        let episodeArtwork = await loadEpisodeArtworkUrl()
+        let info = imageInfo(episodeArtworkUrl: episodeArtwork)
 
         let media: Any?
         switch self {
         case .clipShare(let episode, let clipTime, _):
-            media = try await mediaData(imageInfo: imageInfo, style: style, episode: episode, clipTime: clipTime, destination: destination, clipUUID: clipUUID, scale: Constants.exportedAssetScale, progress: progress)
+            media = try await mediaData(imageInfo: info, style: style, episode: episode, clipTime: clipTime, destination: destination, clipUUID: clipUUID, scale: Constants.exportedAssetScale, progress: progress)
         default:
             let size: CGSize
             switch destination {
@@ -210,7 +223,7 @@ extension SharingModal.Option {
             default:
                 size = CGSize(width: style.previewSize.width, height: style.previewSize.height)
             }
-            media = ShareImageView(info: imageInfo, style: style, angle: .constant(0)).frame(width: size.width, height: size.height).snapshot(scale: Constants.exportedAssetScale)
+            media = ShareImageView(info: info, style: style, angle: .constant(0)).frame(width: size.width, height: size.height).snapshot(scale: Constants.exportedAssetScale)
         }
 
         return [url.map { ActivityItemSourceItem(item: $0, disallowedActivityTypes: [.airDrop]) },
@@ -292,7 +305,7 @@ extension SharingModal.Option {
 
 fileprivate extension Podcast {
     var episodeCount: String? {
-        let count = PodcastManager.episodeCountForPodcast(self, excludeArchive: false)
+        let count = PodcastManager.episodeCount(for: self, excludeArchive: false)
         guard count > 0 else {
             return nil
         }

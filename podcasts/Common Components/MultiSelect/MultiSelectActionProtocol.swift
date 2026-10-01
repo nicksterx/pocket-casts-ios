@@ -1,11 +1,13 @@
 import Foundation
 import PocketCastsDataModel
-protocol MultiSelectActionDelegate: AnyObject {
+import UIKit
+
+@MainActor
+protocol MultiSelectActionDelegate: AnyObject, Sendable {
     func multiSelectPresentingViewController() -> UIViewController
     func multiSelectedBaseEpisodes() -> [BaseEpisode]
     func multiSelectedPlayListEpisodes() -> [PlaylistEpisode]?
     func multiSelectActionBegan(status: String)
     func multiSelectActionCompleted()
-    func multiSelectPreferredStatusBarStyle() -> UIStatusBarStyle
     var multiSelectViewSource: AnalyticsSource { get }
 }

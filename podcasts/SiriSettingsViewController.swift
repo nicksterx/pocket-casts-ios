@@ -103,7 +103,7 @@ class SiriSettingsViewController: PCViewController, UITableViewDelegate, UITable
             case .playPodcast:
                 cell.titleLabel?.text = L10n.settingsSiriShortcutsSpecificPodcast
             case .playPlaylist:
-                cell.titleLabel?.text = FeatureFlag.playlistsRebranding.enabled ? L10n.settingsSiriShortcutsSpecificPlaylist : L10n.settingsSiriShortcutsSpecificFilter
+                cell.titleLabel?.text = L10n.settingsSiriShortcutsSpecificPlaylist
             }
             return cell
         }
@@ -138,7 +138,7 @@ class SiriSettingsViewController: PCViewController, UITableViewDelegate, UITable
 
     private func showPodcastShortcutsViewController() {
         let viewController = PodcastShortcutsViewController()
-        var podcasts = DataManager.sharedManager.allPodcastsOrderedByTitle()
+        var podcasts = DataManager.shared.allPodcastsOrderedByTitle()
         for podcast in podcasts {
             for existingShortcut in enabledShortcuts {
                 guard existingShortcut.shortcut.intent is INPlayMediaIntent else { continue }
@@ -157,7 +157,7 @@ class SiriSettingsViewController: PCViewController, UITableViewDelegate, UITable
 
     private func showPlaylistsShortcutsViewController() {
         let viewController = PlaylistsShortcutsViewController()
-        let playlists = DataManager.sharedManager.allPlaylists(includeDeleted: false)
+        let playlists = DataManager.shared.allPlaylists(includeDeleted: false)
         viewController.playlists = playlists
         viewController.delegate = self
         navigationController?.pushViewController(viewController, animated: true)
@@ -173,11 +173,11 @@ class SiriSettingsViewController: PCViewController, UITableViewDelegate, UITable
 
     private func reloadData() {
         var newSections = [sections]()
-        if enabledShortcuts.count > 0 {
+        if !enabledShortcuts.isEmpty {
             newSections.append(.enabledSection)
         }
 
-        if suggestedShortcuts.count > 0 {
+        if !suggestedShortcuts.isEmpty {
             newSections.append(.suggestedSection)
         }
 
@@ -209,7 +209,7 @@ class SiriSettingsViewController: PCViewController, UITableViewDelegate, UITable
                     self.activityIndicator.stopAnimating()
                     self.errorView.isHidden = false
                 }
-                if let error = error {
+                if let error {
                     FileLog.shared.addMessage("Failed INVoiceShortcutCenter.getAllVoiceShortcuts with error \(error.localizedDescription)")
                 }
             }
@@ -235,20 +235,10 @@ class SiriSettingsViewController: PCViewController, UITableViewDelegate, UITable
         reloadData()
     }
 
-    func voiceShortcutForShortcut(shortcut: INShortcut) -> INVoiceShortcut? {
-        guard let existingShortcuts = enabledShortcuts else { return nil }
-        for voice in existingShortcuts {
-            if voice.shortcut == shortcut {
-                return voice
-            }
-        }
-        return nil
-    }
-
     // MARK: INUIAddVoiceShortcutViewController
 
     func addVoiceShortcutViewController(_ controller: INUIAddVoiceShortcutViewController, didFinishWith voiceShortcut: INVoiceShortcut?, error: Error?) {
-        if let voiceShortcut = voiceShortcut {
+        if let voiceShortcut {
             enabledShortcuts.append(voiceShortcut)
             if let index = suggestedShortcuts.firstIndex(of: voiceShortcut.shortcut) {
                 suggestedShortcuts.remove(at: index)
@@ -278,7 +268,7 @@ class SiriSettingsViewController: PCViewController, UITableViewDelegate, UITable
 
     func editVoiceShortcutViewController(_ controller: INUIEditVoiceShortcutViewController, didDeleteVoiceShortcutWithIdentifier deletedVoiceShortcutIdentifier: UUID) {
         let shortcutsToDelete = enabledShortcuts.filter { $0.identifier == deletedVoiceShortcutIdentifier }
-        if shortcutsToDelete.count > 0 {
+        if !shortcutsToDelete.isEmpty {
             deleteEnabledShortcut(voiceShortcut: shortcutsToDelete[0])
         }
         navigationController?.popToViewController(self, animated: false)

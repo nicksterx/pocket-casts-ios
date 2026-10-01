@@ -13,7 +13,6 @@ struct ImportDetailsView: View {
     @State var opmlURLText = ""
     @State var opmlURLImportResult: OPMLImportResult = .none
     @State var opmlImportInProgress: Bool = false
-    @State var opmlButtonTitle: String = L10n.import
 
     let importSource: ImportViewModel.ImportSource
     let viewModel: ImportViewModel
@@ -107,11 +106,11 @@ struct ImportDetailsView: View {
                 return
             }
             opmlURLImportResult = .none
-            NotificationCenter.default.addObserver(forName: Notification.Name("SJOpmlImportCompleted"), object: nil, queue: nil) { notification in
+            NotificationCenter.default.addObserver(forName: Notification.Name("SJOpmlImportCompleted"), object: nil, queue: nil) { _ in
                 opmlURLImportResult = .success
                 opmlImportInProgress = false
             }
-            NotificationCenter.default.addObserver(forName: Notification.Name("SJOpmlImportFailed"), object: nil, queue: nil) { notification in
+            NotificationCenter.default.addObserver(forName: Notification.Name("SJOpmlImportFailed"), object: nil, queue: nil) { _ in
                 opmlURLImportResult = .failure
                 opmlImportInProgress = false
             }

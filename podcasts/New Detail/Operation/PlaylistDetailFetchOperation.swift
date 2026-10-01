@@ -1,7 +1,7 @@
 import Foundation
 import PocketCastsDataModel
 
-class PlaylistDetailFetchOperation: Operation {
+class PlaylistDetailFetchOperation: Operation, @unchecked Sendable {
     typealias CompletionHandler = ([ListEpisode], Int) -> Void
 
     private let episodesDataManager: EpisodesDataManager
@@ -11,7 +11,7 @@ class PlaylistDetailFetchOperation: Operation {
     private let shouldShowArchived: Bool
 
     init(
-        dataManager: DataManager = .sharedManager,
+        dataManager: DataManager = .shared,
         episodesDataManager: EpisodesDataManager = .init(),
         playlist: EpisodeFilter,
         shouldShowArchived: Bool = false,
@@ -37,8 +37,12 @@ class PlaylistDetailFetchOperation: Operation {
                 episodeUuidToAdd: playlist.episodeUuidToAddToQueries()
             )
 
+            if self.isCancelled { return }
+
             DispatchQueue.main.sync { [weak self] in
                 guard let strongSelf = self else { return }
+                if strongSelf.isCancelled { return }
+
                 strongSelf.completion(newData, archivedEpisodesCount)
             }
         }

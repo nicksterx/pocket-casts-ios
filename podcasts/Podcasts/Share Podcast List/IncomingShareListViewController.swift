@@ -87,7 +87,7 @@ class IncomingShareListViewController: PCViewController, UITableViewDelegate, UI
                                                icon: "option-podcasts",
                                                actions: [subscribeAction])
 
-            optionPicker.show(statusBarStyle: preferredStatusBarStyle)
+            optionPicker.present(from: self)
         } else {
             performSubscribeAll()
         }
@@ -111,7 +111,7 @@ class IncomingShareListViewController: PCViewController, UITableViewDelegate, UI
     }
 
     private func subscribeNext(loadingAlert: ShiftyLoadingAlert) {
-        if podcasts.count == 0 {
+        if podcasts.isEmpty {
             DispatchQueue.main.async { () in
                 loadingAlert.hideAlert(true)
                 self.dismiss(animated: true, completion: nil)
@@ -141,7 +141,7 @@ class IncomingShareListViewController: PCViewController, UITableViewDelegate, UI
 
         SharingServerHandler.shared.loadList(listUrl: url) { podcastList in
             DispatchQueue.main.async {
-                guard let podcastList = podcastList else {
+                guard let podcastList else {
                     self.handleLoadFailed()
 
                     return

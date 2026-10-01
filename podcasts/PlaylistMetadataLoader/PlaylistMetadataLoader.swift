@@ -7,6 +7,8 @@ import PocketCastsUtils
 
 actor PlaylistMetadataLoader {
 
+    static let shared = PlaylistMetadataLoader()
+
     // MARK: - Update Types
 
     /// Represents an update to a playlist's metadata
@@ -40,7 +42,7 @@ actor PlaylistMetadataLoader {
     /// Thread-safe subject for publishing metadata updates.
     /// Access via `updatesPublisher` for subscribing to changes.
     /// Marked nonisolated(unsafe) because PassthroughSubject is internally thread-safe.
-    private nonisolated(unsafe) let updatesSubject = PassthroughSubject<MetadataUpdate, Never>()
+    nonisolated(unsafe) private let updatesSubject = PassthroughSubject<MetadataUpdate, Never>()
 
     /// Publisher that emits metadata updates when counts or images change.
     /// Subscribe to receive updates for specific playlists.
@@ -75,7 +77,7 @@ actor PlaylistMetadataLoader {
 
     /// Subject for publishing when playlists become stale and need refresh.
     /// Marked nonisolated(unsafe) because PassthroughSubject is internally thread-safe.
-    private nonisolated(unsafe) let stalePlaylistsSubject = PassthroughSubject<Set<String>, Never>()
+    nonisolated(unsafe) private let stalePlaylistsSubject = PassthroughSubject<Set<String>, Never>()
 
     /// Publisher that emits sets of playlist IDs that have become stale.
     /// Subscribe to trigger refresh of visible playlists.
@@ -117,7 +119,7 @@ actor PlaylistMetadataLoader {
     static func gridArtworkItems<T>(
         from episodes: [T],
         limit: Int,
-        imageManager: ImageManager = .sharedManager,
+        imageManager: ImageManager = .shared,
         podcastUuid: (T) -> String
     ) -> [PlaylistArtworkView.ImageItem] {
         let distinctEpisodes = distinctPodcasts(from: episodes, limit: limit, podcastUuid: podcastUuid)
@@ -130,8 +132,8 @@ actor PlaylistMetadataLoader {
     }
 
     init(
-        dataManager: DataManager = .sharedManager,
-        imageManager: ImageManager = .sharedManager,
+        dataManager: DataManager = .shared,
+        imageManager: ImageManager = .shared,
         episodesDataManager: EpisodesDataManager = .init()
     ) {
         self.dataManager = dataManager
@@ -141,10 +143,6 @@ actor PlaylistMetadataLoader {
 
     func cachedCount(for playlistID: String) -> Int? {
         return cache.counts[playlistID]?.count
-    }
-
-    func cachedCountState(for playlistID: String) -> CountCacheState? {
-        return cache.counts[playlistID]
     }
 
     func cachedImages(for playlistID: String) -> [PlaylistArtworkView.ImageItem]? {
@@ -222,7 +220,6 @@ actor PlaylistMetadataLoader {
             } catch {
                 return cache.images[playlistID] ?? []
             }
-
         }
         imagesTasks[playlistID] = task
         return await task.value
@@ -350,8 +347,7 @@ actor PlaylistMetadataLoader {
             for episode in episodes {
                 group.addTask {
                     if includingEpisodeArtwork,
-                       let imageUrl = try await ShowInfoCoordinator.shared.loadEpisodeArtworkUrl(podcastUuid: episode.episode.podcastUuid, episodeUuid: episode.episode.uuid),
-                       let url = URL(string: imageUrl) {
+                       let url = try await ShowInfoCoordinator.shared.loadEpisodeArtworkUrl(podcastUuid: episode.episode.podcastUuid, episodeUuid: episode.episode.uuid) {
                         return PlaylistArtworkView.ImageItem(id: episode.episode.uuid, url: url)
                     }
                     let url = self.imageManager.podcastUrl(imageSize: .grid, uuid: episode.episode.podcastUuid)

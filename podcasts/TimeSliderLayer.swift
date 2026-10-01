@@ -3,7 +3,7 @@ import UIKit
 class TimeSliderLayer: CALayer {
 
     @NSManaged private var progressAnimationRect: CGRect
-
+    @NSManaged var animationColor: CGColor
     @NSManaged var leftHalfRect: CGRect
     @NSManaged var rightHalfRect: CGRect
     @NSManaged var knobRect: CGRect
@@ -41,6 +41,7 @@ class TimeSliderLayer: CALayer {
         rightColor = otherLayer.rightColor
         circleColor = otherLayer.circleColor
         popupColor = otherLayer.popupColor
+        animationColor = otherLayer.animationColor
 
         popupValue = otherLayer.popupValue
         textStyle = otherLayer.textStyle
@@ -49,7 +50,7 @@ class TimeSliderLayer: CALayer {
     }
 
     override class func needsDisplay(forKey key: String) -> Bool {
-        if key == "leftHalfRect" || key == "rightHalfRect" || key == "knobRect" || key == "shouldShowPopup" || key == "popupValue" || key == "popupScale" || key == "progressAnimationRect" {
+        if key == "leftHalfRect" || key == "rightHalfRect" || key == "knobRect" || key == "popupValue" || key == "popupScale" || key == "progressAnimationRect"  || key == "animationColor" {
             return true
         }
 
@@ -80,6 +81,15 @@ class TimeSliderLayer: CALayer {
         defer {
             UIGraphicsPopContext()
         }
+
+        //draw animation line
+        if shouldAnimate {
+            let clippedRect = progressAnimationRect.intersection(CGRect(x: leftHalfRect.origin.x, y: leftHalfRect.origin.y, width: leftHalfRect.width + rightHalfRect.width, height: leftHalfRect.height))
+            if !clippedRect.isNull {
+                drawRoundedLine(rect: clippedRect, color: animationColor, context: ctx)
+            }
+        }
+
         // draw the left line
         ctx.setFillColor(leftColor)
         ctx.setStrokeColor(leftColor)
@@ -91,11 +101,6 @@ class TimeSliderLayer: CALayer {
         ctx.setStrokeColor(rightColor)
         let rightPath = UIBezierPath(roundedRect: rightHalfRect, cornerRadius: 2)
         rightPath.fill()
-
-        let animationColor = leftColor.copy(alpha: 0.5) ?? leftColor
-        if shouldAnimate {
-            drawRoundedLine(rect: progressAnimationRect, color: animationColor, context: ctx)
-        }
 
         // draw the knob
         ctx.addEllipse(in: knobRect)
@@ -160,24 +165,26 @@ class TimeSliderLayer: CALayer {
         if animating { return }
 
         animating = true
-        progressAnimationRect = CGRect(x: leftHalfRect.origin.x, y: leftHalfRect.origin.y, width: animationLineWidth(), height: leftHalfRect.size.height)
 
         let duration: CFTimeInterval = 1.0
+        let animationLineWidth = animationLineWidth()
         let progressStartX = leftHalfRect.origin.x
+
+        progressAnimationRect = CGRect(x: progressStartX - animationLineWidth, y: leftHalfRect.origin.y, width: animationLineWidth, height: rightHalfRect.size.height)
 
         let moveAnimation = CAKeyframeAnimation(keyPath: "progressAnimationRect.origin.x")
         moveAnimation.values = [
+            progressStartX - animationLineWidth,
             progressStartX,
-            progressStartX + animationLineWidth(),
-            leftHalfRect.origin.x + leftHalfRect.size.width + rightHalfRect.size.width
+            rightHalfRect.origin.x + rightHalfRect.size.width + animationLineWidth
         ]
         moveAnimation.keyTimes = [0, 0.3, 1]
         moveAnimation.duration = duration
 
         let growAnimation = CAKeyframeAnimation(keyPath: "progressAnimationRect.size.width")
         growAnimation.values = [
-            animationLineWidth() / 2,
-            animationLineWidth(),
+            animationLineWidth / 2,
+            animationLineWidth,
             1
         ]
         growAnimation.keyTimes = [0, 0.5, 1]
@@ -202,5 +209,4 @@ class TimeSliderLayer: CALayer {
     private func animationLineWidth() -> CGFloat {
         (leftHalfRect.size.width + rightHalfRect.size.width) / 3
     }
-
 }

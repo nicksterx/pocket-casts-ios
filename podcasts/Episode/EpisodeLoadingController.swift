@@ -18,7 +18,7 @@ struct EpisodeLoadingView: View {
         ZStack(alignment: .center) {
             if !episodeLoadingModel.error {
                 ProgressView()
-                    .tint(AppTheme.loadingActivityColor().color)
+                    .tint(AppTheme.loadingActivityColor.color)
                     .scaleEffect(x: 2, y: 2, anchor: .center)
             } else {
                 Text(L10n.discoverEpisodeFailToLoad)
@@ -49,16 +49,16 @@ class EpisodeLoadingController: UIHostingController<AnyView> {
 
     // Do a quick check to see if we need to load this episode or not
     static func needsLoading(uuid: String) -> Bool {
-        DataManager.sharedManager.findEpisode(uuid: uuid) == nil
+        DataManager.shared.findEpisode(uuid: uuid) == nil
     }
 
     // Helpers to get the episode/podcast for checks
     private var episode: Episode? {
-        DataManager.sharedManager.findEpisode(uuid: episodeUuid)
+        DataManager.shared.findEpisode(uuid: episodeUuid)
     }
 
     private var podcast: Podcast? {
-        DataManager.sharedManager.findPodcast(uuid: podcastUuid, includeUnsubscribed: true)
+        DataManager.shared.findPodcast(uuid: podcastUuid, includeUnsubscribed: true)
     }
 
     override func viewDidLoad() {
@@ -76,20 +76,9 @@ class EpisodeLoadingController: UIHostingController<AnyView> {
     }
 
     func loadEpisode() async -> Bool {
-        await withCheckedContinuation { continuation in
-            // If we're missing the podcast, then load that and the episode
-            if self.podcast == nil {
-                ServerPodcastManager.shared.addMissingPodcastAndEpisode(episodeUuid: episodeUuid, podcastUuid: podcastUuid)
-            }
-            // If we're missing just the episode then get that
-            else {
-                _ = ServerPodcastManager.shared.addMissingEpisode(episodeUuid: episodeUuid, podcastUuid: podcastUuid)
-            }
+        _ = try? await ServerPodcastManager.shared.addMissingPodcastAndEpisode(episodeUuid: episodeUuid, podcastUuid: podcastUuid)
 
-            // Verify they were added
-            let success = podcast != nil && episode != nil
-            continuation.resume(with: .success(success))
-        }
+        return podcast != nil && episode != nil
     }
 
     @MainActor func doneLoading() {
@@ -111,7 +100,7 @@ class EpisodeLoadingController: UIHostingController<AnyView> {
         }
     }
 
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
+    @MainActor dynamic required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 }

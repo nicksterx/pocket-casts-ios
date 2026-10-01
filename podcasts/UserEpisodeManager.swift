@@ -5,7 +5,7 @@ import PocketCastsUtils
 import UIKit
 
 struct UserEpisodeManager {
-    #if !os(watchOS)
+    #if !os(watchOS) && !os(tvOS)
         static func addUserEpisode(uuid: String, title: String, localFileUrl: URL, artwork: UIImage?, color: Int, fileSize: Int, duration: TimeInterval) throws -> UserEpisode {
             let episode = UserEpisode()
             episode.title = title
@@ -16,7 +16,7 @@ struct UserEpisodeManager {
             episode.uuid = uuid
             episode.sizeInBytes = Int64(fileSize)
             episode.episodeStatus = DownloadStatus.downloaded.rawValue
-            if let artwork = artwork {
+            if let artwork {
                 episode.imageColor = 0
                 do {
                     let filePath = episode.urlForImage()
@@ -30,24 +30,19 @@ struct UserEpisodeManager {
                 episode.hasCustomImage = false
             }
 
-            DataManager.sharedManager.save(episode: episode)
+            DataManager.shared.save(episode: episode)
 
             if SubscriptionHelper.hasActiveSubscription(), Settings.userFilesAutoUpload() {
                 uploadUserEpisode(userEpisode: episode)
             }
 
-            if Settings.userEpisodeAutoAddToUpNext() {
+            if Settings.userEpisodeAutoAddToUpNext {
                 PlaybackManager.shared.addToUpNext(episode: episode, userInitiated: false)
             }
 
             return episode
         }
     #endif
-
-    static func renameUserEpisode(title: String, userEpisode: UserEpisode) {
-        userEpisode.title = title
-        DataManager.sharedManager.save(episode: userEpisode)
-    }
 
     static func uploadUserEpisode(userEpisode: UserEpisode) {
         if ServerSettings.userEpisodeOnlyOnWifi(), !NetworkUtils.shared.isConnectedToUnexpensiveConnection() {
@@ -58,8 +53,8 @@ struct UserEpisodeManager {
     }
 
     static func updateUserEpisodes() {
-        let episodes = DataManager.sharedManager.unsyncedUserEpisodes()
-        if episodes.count > 0 {
+        let episodes = DataManager.shared.unsyncedUserEpisodes()
+        if !episodes.isEmpty {
             ApiServerHandler.shared.uploadFilesUpdateRequest(episodes: episodes, completion: { _ in })
         }
 
@@ -76,17 +71,17 @@ struct UserEpisodeManager {
             return
         }
 
-        DataManager.sharedManager.saveEpisode(uploadStatus: .deleteFromCloudPending, episode: episode)
+        DataManager.shared.saveEpisode(uploadStatus: .deleteFromCloudPending, episode: episode)
         NotificationCenter.default.post(name: ServerNotifications.userEpisodeUploadStatusChanged, object: episode.uuid)
 
         ApiServerHandler.shared.uploadFileDelete(episode: episode, completion: { success in
-            guard let success = success, success else { return }
-            DataManager.sharedManager.saveEpisode(uploadStatus: .notUploaded, episode: episode)
+            guard let success, success else { return }
+            DataManager.shared.saveEpisode(uploadStatus: .notUploaded, episode: episode)
             NotificationCenter.default.post(name: ServerNotifications.userEpisodeUploadStatusChanged, object: episode.uuid)
             UserEpisodeManager.updateUserEpisodes()
         })
 
-        #if !os(watchOS)
+        #if !os(watchOS) && !os(tvOS)
             AnalyticsEpisodeHelper.shared.episodeDeletedFromCloud(episode: episode)
         #endif
     }
@@ -100,7 +95,7 @@ struct UserEpisodeManager {
 
         // if this file isn't uploaded, then it can't be redownloaded, so blow it away
         if !userEpisode.uploaded() {
-            DataManager.sharedManager.delete(userEpisodeUuid: userEpisode.uuid)
+            DataManager.shared.delete(userEpisodeUuid: userEpisode.uuid)
             NotificationCenter.postOnMainThread(notification: Constants.Notifications.userEpisodeDeleted, object: userEpisode.uuid)
         } else {
             NotificationCenter.postOnMainThread(notification: Constants.Notifications.episodeDownloadStatusChanged, object: userEpisode.uuid)
@@ -108,7 +103,7 @@ struct UserEpisodeManager {
     }
 
     static func deleteFromEverywhere(userEpisode: UserEpisode, removeFromPlaybackQueue: Bool = true) {
-        DataManager.sharedManager.saveEpisode(uploadStatus: .deleteFromCloudAndLocalPending, episode: userEpisode)
+        DataManager.shared.saveEpisode(uploadStatus: .deleteFromCloudAndLocalPending, episode: userEpisode)
         NotificationCenter.default.post(name: ServerNotifications.userEpisodeUploadStatusChanged, object: userEpisode.uuid)
 
         if removeFromPlaybackQueue {
@@ -116,9 +111,9 @@ struct UserEpisodeManager {
         }
 
         ApiServerHandler.shared.uploadFileDelete(episode: userEpisode, completion: { success in
-            guard let success = success else { return }
+            guard let success else { return }
             if success {
-                DataManager.sharedManager.saveEpisode(uploadStatus: .notUploaded, episode: userEpisode)
+                DataManager.shared.saveEpisode(uploadStatus: .notUploaded, episode: userEpisode)
                 UserEpisodeManager.deleteFromDevice(userEpisode: userEpisode, removeFromPlaybackQueue: false)
                 UserEpisodeManager.updateUserEpisodes()
             }
@@ -126,13 +121,13 @@ struct UserEpisodeManager {
     }
 
     static func checkForPendingCloudDeletes() {
-        let allCloudDeletes = DataManager.sharedManager.findUserEpisodesWithUploadStatus(.deleteFromCloudPending)
-        if allCloudDeletes.count > 0 {
+        let allCloudDeletes = DataManager.shared.findUserEpisodesWithUploadStatus(.deleteFromCloudPending)
+        if !allCloudDeletes.isEmpty {
             ApiServerHandler.shared.processPendingCloudDeletes(episodes: allCloudDeletes, deleteCompletedHandler: nil)
         }
 
-        let allLocalAndCloudDeletes = DataManager.sharedManager.findUserEpisodesWithUploadStatus(.deleteFromCloudAndLocalPending)
-        if allLocalAndCloudDeletes.count > 0 {
+        let allLocalAndCloudDeletes = DataManager.shared.findUserEpisodesWithUploadStatus(.deleteFromCloudAndLocalPending)
+        if !allLocalAndCloudDeletes.isEmpty {
             ApiServerHandler.shared.processPendingCloudDeletes(episodes: allLocalAndCloudDeletes) { episode in
                 UserEpisodeManager.deleteFromDevice(userEpisode: episode, removeFromPlaybackQueue: false)
             }
@@ -142,7 +137,7 @@ struct UserEpisodeManager {
     static func checkForPendingUploads() {
         // check if any existing episode that have been queued need to be uploaded
         if NetworkUtils.shared.isConnectedToUnexpensiveConnection() {
-            let queuedEpisodes = DataManager.sharedManager.findUserEpisodesWithUploadStatus(.waitingForWifi)
+            let queuedEpisodes = DataManager.shared.findUserEpisodesWithUploadStatus(.waitingForWifi)
             for episode in queuedEpisodes {
                 UploadManager.shared.addToQueue(episodeUuid: episode.uuid, fireNotification: true)
             }
@@ -150,13 +145,13 @@ struct UserEpisodeManager {
     }
 
     static func removeOrphanedUserEpisodes() {
-        DataManager.sharedManager.removeOrphanedUserEpisodes()
+        DataManager.shared.removeOrphanedUserEpisodes()
     }
 
     // MARK: - Update User Episode
 
     static func updateUserEpisode(uuid: String, title: String, color: Int) {
-        guard let episode = DataManager.sharedManager.findUserEpisode(uuid: uuid) else {
+        guard let episode = DataManager.shared.findUserEpisode(uuid: uuid) else {
             return
         }
         var episodeSyncRequired = false
@@ -171,7 +166,7 @@ struct UserEpisodeManager {
             episodeSyncRequired = true
         }
 
-        DataManager.sharedManager.save(episode: episode)
+        DataManager.shared.save(episode: episode)
         NotificationCenter.postOnMainThread(notification: Constants.Notifications.userEpisodeUpdated, object: episode.uuid)
         if episodeSyncRequired {
             ApiServerHandler.shared.uploadSingleFileUpdateRequest(episode: episode, completion: { response in
@@ -180,9 +175,9 @@ struct UserEpisodeManager {
         }
     }
 
-    #if !os(watchOS)
+    #if !os(watchOS) && !os(tvOS)
         static func updateUserEpisodeImage(uuid: String, artwork: UIImage?, completion: @escaping () -> Void) throws {
-            guard let episode = DataManager.sharedManager.findUserEpisode(uuid: uuid) else {
+            guard let episode = DataManager.shared.findUserEpisode(uuid: uuid) else {
                 return
             }
 
@@ -192,7 +187,7 @@ struct UserEpisodeManager {
                     try FileManager.default.removeItem(at: imageUrl)
                 }
 
-                ImageManager.sharedManager.removeUserEpisodeImage(episode: episode, completionHandler: {
+                ImageManager.shared.removeUserEpisodeImage(episode: episode, completionHandler: {
                     episode.imageUrl = nil
                     if episode.imageColor != 0 {
                         episode.imageColor = 0
@@ -200,7 +195,7 @@ struct UserEpisodeManager {
                     }
 
                     let filePath = episode.urlForImage()
-                    if let artwork = artwork {
+                    if let artwork {
                         do {
                             try artwork.jpegData(compressionQuality: 1)?.write(to: filePath)
                             episode.imageModified = TimeFormatter.currentUTCTimeInMillis()
@@ -210,7 +205,7 @@ struct UserEpisodeManager {
                         }
                         episode.hasCustomImage = true
                     }
-                    DataManager.sharedManager.save(episode: episode)
+                    DataManager.shared.save(episode: episode)
                     NotificationCenter.postOnMainThread(notification: Constants.Notifications.userEpisodeUpdated, object: episode.uuid)
                     if episode.uploaded() {
                         if artwork != nil {
@@ -233,69 +228,67 @@ struct UserEpisodeManager {
     static func cleanupCloudOnlyFiles() {
         UploadManager.shared.stopAllUploads()
 
-        let cloudEpisodes = DataManager.sharedManager.allUserEpisodesUploaded()
+        let cloudEpisodes = DataManager.shared.allUserEpisodesUploaded()
         for episode in cloudEpisodes {
             if episode.downloaded(pathFinder: DownloadManager.shared) {
                 if episode.uploaded() || episode.uploadFailed() {
-                    DataManager.sharedManager.saveEpisode(uploadStatus: .notUploaded, episode: episode)
+                    DataManager.shared.saveEpisode(uploadStatus: .notUploaded, episode: episode)
                 }
             } else {
                 DownloadManager.shared.removeFromQueue(episodeUuid: episode.uuid, fireNotification: false, userInitiated: true)
                 PlaybackManager.shared.removeIfPlayingOrQueued(episode: episode, fireNotification: true)
-                DataManager.sharedManager.delete(userEpisodeUuid: episode.uuid)
+                DataManager.shared.delete(userEpisodeUuid: episode.uuid)
             }
         }
         ServerSettings.removeFilesLastModifiedKey()
     }
 
-    #if !os(watchOS)
-    static func presentDeleteOptions(episode: UserEpisode, preferredStatusBarStyle: UIStatusBarStyle, themeOverride: Theme.ThemeType?, dismissCallback: (() -> ())? = nil, actionCallback: ((Bool, Bool) -> Void)? = nil) {
-            let optionPicker = OptionsPicker(title: "", themeOverride: themeOverride)
-
-            if let dismissCallback {
-                optionPicker.setNoActionCallback(dismissCallback)
-            }
-
-            let deleteCloudAction = OptionAction(label: L10n.deleteFromCloud, icon: nil, action: { [] in
-                UserEpisodeManager.deleteFromCloud(episode: episode)
-                actionCallback?(false, true)
-            })
-
-            let deleteDeviceLabel = episode.uploaded() && episode.downloaded(pathFinder: DownloadManager.shared) ? L10n.deleteFromDeviceOnly : L10n.deleteFromDevice
-            let deleteDeviceAction = OptionAction(label: deleteDeviceLabel, icon: nil, action: { [] in
-                UserEpisodeManager.deleteFromDevice(userEpisode: episode)
-                actionCallback?(true, false)
-            })
-            let deleteEverywhereAction = OptionAction(label: L10n.deleteEverywhereShort, icon: nil, action: { [] in
-                UserEpisodeManager.deleteFromEverywhere(userEpisode: episode)
-                actionCallback?(true, true)
-            })
-            deleteDeviceAction.destructive = episode.uploaded() && episode.downloaded(pathFinder: DownloadManager.shared) ? false : true
-            deleteCloudAction.destructive = true
-            deleteEverywhereAction.destructive = true
-
-            var actions: [OptionAction]
-            if episode.downloaded(pathFinder: DownloadManager.shared), episode.uploaded() {
-                actions = [deleteDeviceAction, deleteEverywhereAction]
-            } else if episode.downloaded(pathFinder: DownloadManager.shared), !episode.uploaded() {
-                actions = [deleteDeviceAction]
-            } else if !episode.downloaded(pathFinder: DownloadManager.shared), episode.uploaded() {
-                actions = [deleteCloudAction]
-            } else {
-                actions = [deleteDeviceAction]
-            }
-
-            let title: String
-            if episode.uploaded(), !episode.downloaded(pathFinder: DownloadManager.shared) {
-                title = L10n.deleteFromCloud
-            } else if !episode.uploaded(), episode.downloaded(pathFinder: DownloadManager.shared) {
-                title = L10n.deleteFromDevice
-            } else {
-                title = L10n.deleteFile
-            }
-            optionPicker.addDescriptiveActions(title: title, message: L10n.deleteFileMessage, icon: "delete-red", actions: actions)
-
-            optionPicker.show(statusBarStyle: preferredStatusBarStyle)
+    #if !os(watchOS) && !os(tvOS)
+    static func presentDeleteOptions(episode: UserEpisode, from presenter: UIViewController, dismissCallback: (() -> ())? = nil, actionCallback: ((Bool, Bool) -> Void)? = nil) {
+        let cancelAction = UIAlertAction(title: L10n.cancel, style: .cancel) { _ in
+            dismissCallback?()
         }
+
+        let deleteCloudAction = UIAlertAction(title: L10n.deleteFromCloud, style: .destructive) { _ in
+            UserEpisodeManager.deleteFromCloud(episode: episode)
+            actionCallback?(false, true)
+        }
+
+        let deleteDeviceLabel = episode.uploaded() && episode.downloaded(pathFinder: DownloadManager.shared) ? L10n.deleteFromDeviceOnly : L10n.deleteFromDevice
+        let deleteDeviceStyle: UIAlertAction.Style = episode.uploaded() && episode.downloaded(pathFinder: DownloadManager.shared) ? .default : .destructive
+        let deleteDeviceAction = UIAlertAction(title: deleteDeviceLabel, style: deleteDeviceStyle) { _ in
+            UserEpisodeManager.deleteFromDevice(userEpisode: episode)
+            actionCallback?(true, false)
+        }
+        let deleteEverywhereAction = UIAlertAction(title: L10n.deleteEverywhereShort, style: .destructive) { _ in
+            UserEpisodeManager.deleteFromEverywhere(userEpisode: episode)
+            actionCallback?(true, true)
+        }
+
+        var actions: [UIAlertAction]
+        if episode.downloaded(pathFinder: DownloadManager.shared), episode.uploaded() {
+            actions = [deleteDeviceAction, deleteEverywhereAction]
+        } else if episode.downloaded(pathFinder: DownloadManager.shared), !episode.uploaded() {
+            actions = [deleteDeviceAction]
+        } else if !episode.downloaded(pathFinder: DownloadManager.shared), episode.uploaded() {
+            actions = [deleteCloudAction]
+        } else {
+            actions = [deleteDeviceAction]
+        }
+
+        let title: String
+        if episode.uploaded(), !episode.downloaded(pathFinder: DownloadManager.shared) {
+            title = L10n.deleteFromCloud
+        } else if !episode.uploaded(), episode.downloaded(pathFinder: DownloadManager.shared) {
+            title = L10n.deleteFromDevice
+        } else {
+            title = L10n.deleteFile
+        }
+
+        let alert = UIAlertController(title: title, message: L10n.deleteFileMessage, preferredStyle: .alert)
+        alert.addAction(cancelAction)
+        actions.forEach { alert.addAction($0) }
+        presenter.present(alert, animated: true)
+    }
     #endif
 }

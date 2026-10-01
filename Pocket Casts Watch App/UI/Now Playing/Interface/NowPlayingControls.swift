@@ -17,17 +17,9 @@ struct NowPlayingControls: View {
                 // To take into account the page indicator view
                 Spacer().frame(height: Constants.pagingIndicatorHeight)
             }
-            .modify { content in
-                if #available(watchOS 10.0, *) {
-                    content.containerRelativeFrame(.vertical)
-                }
-            }
+            .containerRelativeFrame(.vertical)
         }
-        .modify { content in
-            if #available(watchOS 9.4, *) {
-                content.scrollBounceBehavior(.basedOnSize)
-            }
-        }
+        .scrollBounceBehavior(.basedOnSize)
         .ignoresSafeArea(.all, edges: .bottom)
     }
 
@@ -78,7 +70,7 @@ struct NowPlayingControls: View {
 
     private var playPauseButton: some View {
         Button {
-            WKInterfaceDevice.current().play(viewModel.isPlaying ? .click : .start)
+            WKInterfaceDevice.current().play(.click)
             viewModel.playPauseTapped()
         } label: {
             Image(viewModel.isPlaying ? "pause" : "play")

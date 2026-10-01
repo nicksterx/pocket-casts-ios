@@ -9,14 +9,16 @@ private enum TableSection: Int, CaseIterable {
 }
 
 class ManualPlaylistsChooserViewController: PCViewController {
+    /// The complete, authoritative list of playlists. Never filtered — used to apply changes on Done.
+    private var allManualPlaylists: [EpisodeFilter] = []
+    /// The list currently shown in the table. Equal to `allManualPlaylists` unless a search is filtering it.
     private var manualPlaylists: [EpisodeFilter] = []
-    private var tempManualPlaylists: [EpisodeFilter] = []
     private var initialSelectedPlaylists: Set<String> = []
     private var newSelectedPlaylists: Set<String> = []
     private var searchController: PCSearchBarController?
     private let episodes: [Episode]
     private let analyticsSource: String
-    private let dataManager = DataManager.sharedManager
+    private let dataManager = DataManager.shared
 
     private var tableView: ThemeableTable! {
         didSet {
@@ -46,7 +48,7 @@ class ManualPlaylistsChooserViewController: PCViewController {
     private var footerView: ThemeableView! {
         didSet {
             footerView.translatesAutoresizingMaskIntoConstraints = false
-            footerView.backgroundColor = AppTheme.viewBackgroundColor()
+            footerView.backgroundColor = AppTheme.viewBackgroundColor
         }
     }
 
@@ -79,7 +81,7 @@ class ManualPlaylistsChooserViewController: PCViewController {
     }
 
     private func setupNavBar() {
-        let backgroundColor = AppTheme.viewBackgroundColor()
+        let backgroundColor = AppTheme.viewBackgroundColor
         changeNavTint(titleColor: AppTheme.colorForStyle(.primaryText01), iconsColor: AppTheme.colorForStyle(.primaryIcon03), backgroundColor: backgroundColor)
 
         title = L10n.playlistManualEpisodeAddToPlaylist
@@ -89,23 +91,24 @@ class ManualPlaylistsChooserViewController: PCViewController {
         navigationController?.navigationBar.prefersLargeTitles = false
         navigationItem.largeTitleDisplayMode = .never
 
-        let appearance = UINavigationBarAppearance()
-        appearance.backgroundColor = backgroundColor
-        appearance.largeTitleTextAttributes = [
-            NSAttributedString.Key.foregroundColor: AppTheme.colorForStyle(.primaryText01)
-        ]
-        appearance.titleTextAttributes = [
-            NSAttributedString.Key.foregroundColor: AppTheme.colorForStyle(.primaryText01)
-        ]
-        navigationController?.navigationBar.scrollEdgeAppearance = appearance
-        navigationController?.navigationBar.standardAppearance = appearance
-        navigationController?.navigationBar.sizeToFit()
+        if !LiquidGlass.isEnabled {
+            let appearance = UINavigationBarAppearance()
+            appearance.backgroundColor = backgroundColor
+            appearance.largeTitleTextAttributes = [
+                NSAttributedString.Key.foregroundColor: AppTheme.colorForStyle(.primaryText01)
+            ]
+            appearance.titleTextAttributes = [
+                NSAttributedString.Key.foregroundColor: AppTheme.colorForStyle(.primaryText01)
+            ]
+            navigationController?.navigationBar.scrollEdgeAppearance = appearance
+            navigationController?.navigationBar.standardAppearance = appearance
+        }
     }
 
     private func setupContent() {
         isModalInPresentation = true
 
-        view.backgroundColor = AppTheme.viewBackgroundColor()
+        view.backgroundColor = AppTheme.viewBackgroundColor
 
         tableView = ThemeableTable()
         view.insertSubview(tableView, at: 0)
@@ -135,9 +138,8 @@ class ManualPlaylistsChooserViewController: PCViewController {
             tableView.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: 0)
         ])
 
-        view.layoutSubviews()
-
-        manualPlaylists = dataManager.allManualPlaylists(includeDeleted: false)
+        allManualPlaylists = dataManager.allManualPlaylists(includeDeleted: false)
+        manualPlaylists = allManualPlaylists
 
         if episodes.count == 1, let episode = episodes.first {
             let uuids = dataManager.manualPlaylistUUIDs(for: episode.uuid)
@@ -145,7 +147,7 @@ class ManualPlaylistsChooserViewController: PCViewController {
         } else {
             // For bulk episodes, find playlists that contain ALL selected episodes
             var playlistsContainingAllEpisodes: Set<String> = []
-            for playlist in manualPlaylists {
+            for playlist in allManualPlaylists {
                 let allEpisodesInPlaylist = episodes.allSatisfy { episode in
                     dataManager.manualPlaylistUUIDs(for: episode.uuid).contains(playlist.uuid)
                 }
@@ -179,7 +181,7 @@ class ManualPlaylistsChooserViewController: PCViewController {
 
         let maxPlaylistItems = Constants.Limits.maxFilterItems
 
-        manualPlaylists.forEach { playlist in
+        allManualPlaylists.forEach { playlist in
             if added.contains(playlist.uuid) {
                 if episodes.count > maxPlaylistItems {
                     Toast.show(L10n.playlistManualAddTooManyEpisodesToast(maxPlaylistItems.localized(.decimal)))
@@ -203,9 +205,10 @@ class ManualPlaylistsChooserViewController: PCViewController {
         changedPlaylists.forEach { playlist in
             playlist.syncStatus = SyncStatus.notSynced.rawValue
             dataManager.save(playlist: playlist)
+            PlaylistManager.checkForAutoDownloads(in: playlist)
         }
 
-        let showAddedToast = !added.isEmpty && changedPlaylists.count > 0
+        let showAddedToast = !added.isEmpty && !changedPlaylists.isEmpty
 
         dismiss(animated: true) {
             guard showAddedToast else {
@@ -223,7 +226,7 @@ class ManualPlaylistsChooserViewController: PCViewController {
                         if let rootVC = SceneHelper.rootViewController(includeTopMost: false),
                            rootVC.presentedViewController != nil {
                             rootVC.dismiss(animated: true) {
-                                NavigationManager.sharedManager.navigateTo(
+                                NavigationManager.shared.navigateTo(
                                     NavigationManager.filterPageKey,
                                     data: [
                                         NavigationManager.filterUuidKey: playlist.uuid
@@ -231,7 +234,7 @@ class ManualPlaylistsChooserViewController: PCViewController {
                                 )
                             }
                         } else {
-                            NavigationManager.sharedManager.navigateTo(
+                            NavigationManager.shared.navigateTo(
                                 NavigationManager.filterPageKey,
                                 data: [
                                     NavigationManager.filterUuidKey: playlist.uuid
@@ -268,8 +271,8 @@ extension ManualPlaylistsChooserViewController: UITableViewDelegate, UITableView
         default:
             let playlist = manualPlaylists[indexPath.row]
             let episodeIsInPlaylist = initialSelectedPlaylists.contains(playlist.uuid)
-            let onToggleChange: (Bool) -> Void = { [weak self] selected in
-                guard let self = self else { return }
+            let onToggleChange: (Bool) -> Void = { [weak self, weak tableView] selected in
+                guard let self else { return }
 
                 if selected {
                     let maxPlaylistItems = Constants.Limits.maxFilterItems
@@ -281,11 +284,11 @@ extension ManualPlaylistsChooserViewController: UITableViewDelegate, UITableView
                 } else {
                     self.newSelectedPlaylists.remove(playlist.uuid)
                 }
-                tableView.reloadRows(at: [indexPath], with: .none)
+                tableView?.reloadRows(at: [indexPath], with: .none)
             }
             let isSelected = Binding<Bool>(
                 get: { [weak self] in
-                    guard let self = self else { return false }
+                    guard let self else { return false }
                     return self.newSelectedPlaylists.contains(playlist.uuid)
                 },
                 set: { newValue in
@@ -325,20 +328,17 @@ extension ManualPlaylistsChooserViewController: UITableViewDelegate, UITableView
 }
 
 extension ManualPlaylistsChooserViewController: PCSearchBarDelegate {
-    func searchDidBegin() {
-        tempManualPlaylists = manualPlaylists
-    }
+    func searchDidBegin() { }
 
     func searchDidEnd() {
-        manualPlaylists = tempManualPlaylists
-        tempManualPlaylists.removeAll()
+        manualPlaylists = allManualPlaylists
         tableView.reload(section: .playlists, with: .automatic)
     }
 
     func searchWasCleared() {
         // TODO: Add analytics
 
-        manualPlaylists = tempManualPlaylists
+        manualPlaylists = allManualPlaylists
         tableView.reload(section: .playlists, with: .automatic)
     }
 
@@ -347,7 +347,7 @@ extension ManualPlaylistsChooserViewController: PCSearchBarDelegate {
     func performSearch(searchTerm: String, triggeredByTimer: Bool, completion: @escaping (() -> Void)) {
         // TODO: Add analytics
 
-        manualPlaylists = tempManualPlaylists.filter {
+        manualPlaylists = allManualPlaylists.filter {
             $0.playlistName.localizedCaseInsensitiveContains(searchTerm)
         }
         tableView.reload(section: .playlists, with: .automatic)
@@ -356,28 +356,13 @@ extension ManualPlaylistsChooserViewController: PCSearchBarDelegate {
 
     private func setupSearchController() {
         searchController = PCSearchBarController()
-        searchController?.searchDebounce = 0.2
 
         guard let searchController else {
             return
         }
 
-        searchController.view.translatesAutoresizingMaskIntoConstraints = false
-        addChild(searchController)
-        view.addSubview(searchController.view)
-        searchController.didMove(toParent: self)
-
-        let topAnchor = searchController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
-        NSLayoutConstraint.activate([
-            searchController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            searchController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            searchController.view.heightAnchor.constraint(equalToConstant: PCSearchBarController.defaultHeight),
-            topAnchor
-        ])
-
+        searchController.install(in: self, attachedTo: tableView, collapses: false)
         searchController.placeholderText = L10n.playlistSearch
-        searchController.searchControllerTopConstant = topAnchor
-        searchController.setupScrollView(tableView, hideSearchInitially: false)
         searchController.searchDebounce = Settings.podcastSearchDebounceTime()
         searchController.searchDelegate = self
 

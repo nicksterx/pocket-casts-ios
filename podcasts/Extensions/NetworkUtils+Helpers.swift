@@ -4,6 +4,21 @@ import PocketCastsServer
 import PocketCastsUtils
 
 extension NetworkUtils {
+#if os(tvOS)
+    //On tvOS it's allways allowed to download upload
+    func downloadEpisodeRequested(autoDownloadStatus: AutoDownloadStatus, _ allowed: ((_ later: Bool) -> Void)?, disallowed: (() -> Void)?) {
+        allowed?(true)
+    }
+
+    func streamEpisodeRequested(_ allowed: (() -> Void)?, disallowed: (() -> Void)?) {
+        allowed?()
+    }
+
+    func uploadEpisodeRequested(_ allowed: ((_ later: Bool) -> Void)?, disallowed: (() -> Void)?) {
+        allowed?(true)
+    }
+#else
+    @MainActor
     func downloadEpisodeRequested(autoDownloadStatus: AutoDownloadStatus, _ allowed: ((_ later: Bool) -> Void)?, disallowed: (() -> Void)?) {
         let mobileDataAllowed = autoDownloadStatus == .autoDownloaded ? Settings.autoDownloadMobileDataAllowed() : Settings.mobileDataAllowed()
 
@@ -13,7 +28,7 @@ extension NetworkUtils {
             return
         }
 
-        let optionsPicker = OptionsPicker(title: nil)
+        let optionsPicker = OptionsPicker()
         let downloadAction = OptionAction(label: L10n.podcastDownloadNow, icon: nil) {
             allowed?(false)
         }
@@ -28,9 +43,10 @@ extension NetworkUtils {
             disallowed?()
         }
 
-        optionsPicker.show(statusBarStyle: AppTheme.defaultStatusBarStyle())
+        optionsPicker.present()
     }
 
+    @MainActor
     func streamEpisodeRequested(_ allowed: (() -> Void)?, disallowed: (() -> Void)?) {
         if Settings.mobileDataAllowed() || isConnectedToUnexpensiveConnection() {
             allowed?()
@@ -38,7 +54,7 @@ extension NetworkUtils {
             return
         }
 
-        let optionsPicker = OptionsPicker(title: nil)
+        let optionsPicker = OptionsPicker()
         let streamAction = OptionAction(label: L10n.podcastStreamConfirmation, icon: nil) {
             allowed?()
         }
@@ -48,11 +64,12 @@ extension NetworkUtils {
             disallowed?()
         }
 
-        optionsPicker.show(statusBarStyle: AppTheme.defaultStatusBarStyle())
+        optionsPicker.present()
     }
 
     // MARK: - Upload Helpers
 
+    @MainActor
     func uploadEpisodeRequested(_ allowed: ((_ later: Bool) -> Void)?, disallowed: (() -> Void)?) {
         let mobileDataAllowed = !ServerSettings.userEpisodeOnlyOnWifi()
 
@@ -62,7 +79,7 @@ extension NetworkUtils {
             return
         }
 
-        let optionsPicker = OptionsPicker(title: nil)
+        let optionsPicker = OptionsPicker()
         let uploadAction = OptionAction(label: "Upload Now", icon: nil) {
             allowed?(false)
         }
@@ -76,6 +93,7 @@ extension NetworkUtils {
             disallowed?()
         }
 
-        optionsPicker.show(statusBarStyle: AppTheme.defaultStatusBarStyle())
+        optionsPicker.present()
     }
+#endif
 }

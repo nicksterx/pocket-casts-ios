@@ -4,7 +4,7 @@ import PocketCastsServer
 import UIKit
 
 class GoogleCastManager: NSObject, GCKRemoteMediaClientListener, GCKSessionManagerListener, GCKCastDeviceStatusListener {
-    static let sharedManager = GoogleCastManager()
+    static let shared = GoogleCastManager()
 
     let deviceManager = CastDevicesManager()
 
@@ -187,8 +187,13 @@ class GoogleCastManager: NSObject, GCKRemoteMediaClientListener, GCKSessionManag
         episodeToPlayOnConnect = episode
         bufferingInitialPartOfEpisode = true
 
-        // metadata about the episode to display on the Google Cast
-        let episodeMetadata = GCKMediaMetadata(metadataType: episode.videoPodcast() ? .movie : .musicTrack)
+        // metadata about the episode to display on the Google Cast.
+        // HLS streams can carry video that isn't reflected in the episode's file type, and the phone
+        // only knows for sure once it's decoded locally. To keep things simple we assume an episode with
+        // a usable HLS stream (HLS feature enabled + valid HLS URL) is video, so the receiver renders it
+        // rather than presenting audio-only.
+        let isHLS = EpisodeManager.hasHLSStream(episode)
+        let episodeMetadata = GCKMediaMetadata(metadataType: (episode.videoPodcast() || isHLS) ? .movie : .musicTrack)
 
         if let episode = episode as? Episode, let uuid = episode.parentPodcast()?.uuid {
             let episodeImage = GCKImage(url: ServerHelper.imageUrl(podcastUuid: uuid, size: 680), width: 680, height: 680)
@@ -212,8 +217,11 @@ class GoogleCastManager: NSObject, GCKRemoteMediaClientListener, GCKSessionManag
 
         // custom data that things like the iOS and Android app know to look for
         let episodeInfo = [episodeUuidKey: episode.uuid]
-        let downloadUrl = EpisodeManager.urlForEpisode(episode, streamingOnly: true)
-        let fileType = episode.fileType ?? ""
+        let downloadUrl = EpisodeManager.url(for: episode, streamingOnly: true)
+        // When streaming HLS, the content URL is an .m3u8 manifest, not the progressive file.
+        // The receiver needs the HLS content type to load it — the episode's file type describes
+        // the progressive enclosure and would make the receiver try to play the manifest directly.
+        let fileType = isHLS ? Episode.advertisedHLSMimeType : (episode.fileType ?? "")
         let mediaBuilder = GCKMediaInformationBuilder()
         mediaBuilder.contentURL = downloadUrl
         mediaBuilder.streamType = .buffered
@@ -226,7 +234,7 @@ class GoogleCastManager: NSObject, GCKRemoteMediaClientListener, GCKSessionManag
         pausing = false
         let loadOptions = GCKMediaLoadOptions()
 
-        let adjustedSpeed = min(googleCastMaxPlaybackRate, Float(PlaybackManager.shared.effects().playbackSpeed))
+        let adjustedSpeed = min(googleCastMaxPlaybackRate, Float(PlaybackManager.shared.effects.playbackSpeed))
         loadOptions.autoplay = true
         loadOptions.playPosition = PlaybackManager.shared.requiredStartingPosition()
         loadOptions.playbackRate = adjustedSpeed
@@ -278,7 +286,7 @@ class GoogleCastManager: NSObject, GCKRemoteMediaClientListener, GCKSessionManag
             return mediaInfo.streamDuration
         }
 
-        if let playerEpisode = PlaybackManager.shared.currentEpisode() {
+        if let playerEpisode = PlaybackManager.shared.currentEpisode {
             return playerEpisode.duration
         }
 
@@ -288,7 +296,7 @@ class GoogleCastManager: NSObject, GCKRemoteMediaClientListener, GCKSessionManag
     // MARK: - GCKRemoteMediaClientListener
 
     func remoteMediaClient(_ client: GCKRemoteMediaClient, didUpdate mediaStatus: GCKMediaStatus?) {
-        guard let mediaStatus = mediaStatus else { return }
+        guard let mediaStatus else { return }
         AnalyticsPlaybackHelper.shared.currentSource = .chromecast
 
         if mediaStatus.playerState == .playing {

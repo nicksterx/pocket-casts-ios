@@ -4,12 +4,11 @@ import PocketCastsDataModel
 import PocketCastsServer
 import PocketCastsUtils
 import UIKit
-import Kingfisher
 import SafariServices
 
-class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, ShareListDelegate {
+class PodcastListViewController: PCViewController, ShareListDelegate {
     let gridHelper = GridHelper()
-    var refreshControl: PCRefreshControl?
+    var refreshController: FullSyncRefreshController?
     var bannerAdModel: BannerAdModel?
 
     /// Indicates whether the banner ad is currently animating to indicate to the collection view layout which size to use
@@ -22,7 +21,7 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
             addPodcastBtn.buttonTitle = L10n.podcastGridDiscoverPodcasts
             addPodcastBtn.buttonTapped = {
                 Analytics.track(.podcastsListDiscoverButtonTapped)
-                NavigationManager.sharedManager.navigateTo(NavigationManager.discoverPageKey, data: nil)
+                NavigationManager.shared.navigateTo(NavigationManager.discoverPageKey, data: nil)
             }
         }
     }
@@ -38,9 +37,38 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
     }
 
     var gridItems = [HomeGridListItem]()
-    var gridLayout: LibraryType = Settings.libraryType()
+    var gridLayout: LibraryType = Settings.libraryType
+
+    var isEditingOrder = false
+    var savedRightBarButtonItem: UIBarButtonItem?
 
     private var lastWillLayoutWidth: CGFloat = 0
+
+    /// Gap below the grid (as a fraction of the bottom safe area) so its last content clears
+    /// the floating tab bar / mini player. The fade fills the safe area above the gap. Only
+    /// applied while the bottom fade is enabled.
+    private static let bottomSpacingFraction: CGFloat = 0.2
+
+    /// How far the fade's top extends above the bottom safe area edge while the tab bar is
+    /// expanded, so it's taller and eases in earlier. Dropped to 0 when the bar collapses to
+    /// its compact pill (see `updateBottomFadeOvershoot`), which needs less covering.
+    private static let bottomFadeTopOvershoot: CGFloat = 9
+
+    private lazy var bottomFadeView = ProgressiveFadeView()
+
+    /// The fade's top constraint, kept so its constant can track the tab bar's collapsed state.
+    private var bottomFadeTopConstraint: NSLayoutConstraint?
+
+    /// Pins the grid's bottom to the view's bottom; raised by `bottomSpacingFraction` of the
+    /// bottom safe area while the fade is enabled.
+    @IBOutlet private var collectionViewBottomConstraint: NSLayoutConstraint!
+
+    /// Whether the Liquid Glass bottom fade / spacing is active.
+    private var isBottomFadeEnabled = false
+
+    /// Padding kept below the grid's last row under Liquid Glass, on top of the bottom safe
+    /// area, so the row still clears the floating tab bar after it expands back out.
+    private static let bottomContentPadding: CGFloat = 16
 
     private var homeGridDataHelper = HomeGridDataHelper()
 
@@ -66,23 +94,32 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
         customRightBtn?.accessibilityLabel = L10n.accessibilityMoreActions
         super.viewDidLoad()
 
+        registerForTraitChanges([UITraitUserInterfaceIdiom.self]) { (controller: PodcastListViewController, _) in
+            controller.updateCustomBottomFade()
+        }
+
         updateNavigationButtons()
         title = L10n.podcastsPlural
         setupSearchBar()
         setupRefreshControl()
 
-        let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-        podcastsCollectionView.addGestureRecognizer(longPressGesture)
-        longPressGesture.delegate = self
+        podcastsCollectionView.dragDelegate = self
+        podcastsCollectionView.dropDelegate = self
+        podcastsCollectionView.dragInteractionEnabled = false
+        podcastsCollectionView.reorderingCadence = .immediate
+        updateCustomBottomFade()
 
         adjustSettingsForGridType()
-        insetAdjuster.setupInsetAdjustmentsForMiniPlayer(scrollView: podcastsCollectionView)
+        if !LiquidGlass.isEnabled {
+            // Under Liquid Glass the mini player is a tab accessory covered by the safe area,
+            // so the adjuster only ever zeroes the bottom inset back out from under
+            // `updateInsets`.
+            insetAdjuster.setupInsetAdjustmentsForMiniPlayer(scrollView: podcastsCollectionView)
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-
-        refreshControl?.parentViewControllerDidAppear()
 
         updateInsets()
         refreshGridItems()
@@ -90,9 +127,9 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
         updateNavigationButtons()
 
         Analytics.track(.podcastsListShown, properties: [
-            "sort_order": Settings.homeFolderSortOrder(),
-            "badge_type": Settings.podcastBadgeType(),
-            "layout": Settings.libraryType(),
+            "sort_order": Settings.homeFolderSortOrder,
+            "badge_type": Settings.podcastBadgeType,
+            "layout": Settings.libraryType,
             "number_of_podcasts": homeGridDataHelper.numberOfPodcasts,
             "number_of_folders": homeGridDataHelper.numberOfFolders
         ])
@@ -128,9 +165,11 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         bannerTask?.cancel()
-        refreshControl?.parentViewControllerDidDisappear()
         navigationController?.navigationBar.shadowImage = nil
         removeAllCustomObservers()
+        if isEditingOrder {
+            setEditingOrder(false)
+        }
     }
 
     private func addEventObservers() {
@@ -154,7 +193,7 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
 
     @objc private func subscriptionStatusDidChange() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             self.updateNavigationButtons()
             self.loadBannerAd()
@@ -166,7 +205,7 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
 
         if SubscriptionHelper.shouldDisplayBannerAd {
             DiscoverServerHandler.shared.blazePromotion(for: .podcastList) { [weak self] promotion, shouldAnimate in
-                guard let self = self else { return }
+                guard let self else { return }
 
                 if shouldAnimate {
                     self.bannerTask = Task { [weak self] in
@@ -191,57 +230,6 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
                 }
             }
         }
-    }
-
-    private func makeBadge(size: CGFloat) -> UIView {
-        let badgeView = CircleView()
-        badgeView.borderColor = ThemeColor.secondaryUi01()
-        badgeView.centerColor = ThemeColor.primaryInteractive01()
-        badgeView.backgroundColor = .clear
-        badgeView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            badgeView.widthAnchor.constraint(equalToConstant: size),
-            badgeView.heightAnchor.constraint(equalToConstant: size),
-        ])
-        return badgeView
-    }
-
-    private func makeProfileButton(email: String?) -> UIBarButtonItem {
-        let avatarSize = CGFloat(32)
-        let imageView = UIImageView(frame: CGRect(x: 0, y: 0, width: avatarSize, height: avatarSize))
-        imageView.contentMode = .center
-        let profileImage = UIImage(named: "profile-placeholder")?.withRenderingMode(.alwaysTemplate)
-        imageView.image = profileImage
-        if let email {
-            imageView.contentMode = .scaleAspectFit
-            let gravatarURL = URL(string: "https://www.gravatar.com/avatar/\(email.sha256)?d=404&s=\(256)")
-            let processor = DownsamplingImageProcessor(size: imageView.bounds.size) |> RoundCornerImageProcessor(cornerRadius: 20)
-            imageView.kf.setImage(with: gravatarURL, placeholder: profileImage, options: [
-                .processor(processor),
-                .scaleFactor(UIScreen.main.scale),
-                .transition(.fade(1)),
-                .cacheOriginalImage
-            ])
-        }
-
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(profileTapped(_:)))
-        imageView.addGestureRecognizer(tapGesture)
-        imageView.isUserInteractionEnabled = true
-        NSLayoutConstraint.activate([
-            imageView.widthAnchor.constraint(equalToConstant: avatarSize),
-            imageView.heightAnchor.constraint(equalToConstant: avatarSize),
-        ])
-
-        if EndOfYear.isEligible, EndOfYear.shouldShowBadge {
-            let badgeSize = CGFloat(10)
-            let badge = makeBadge(size: badgeSize)
-            imageView.addSubview(badge)
-            NSLayoutConstraint.activate([
-                badge.centerXAnchor.constraint(equalTo: imageView.rightAnchor, constant: -(badgeSize / 2)),
-                badge.centerYAnchor.constraint(equalTo: imageView.topAnchor, constant: +(badgeSize / 2)),
-            ])
-        }
-        return UIBarButtonItem(customView: imageView)
     }
 
     private func updateNavigationButtons() {
@@ -274,20 +262,119 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
     }
 
     private var horizontalMargin: CGFloat {
-        Settings.libraryType() == .list ? 0 : 16
+        Settings.libraryType == .list ? 0 : 16
     }
 
     private func updateInsets() {
         let currentInsets = podcastsCollectionView.contentInset
-        podcastsCollectionView.contentInset = UIEdgeInsets(top: currentInsets.top, left: horizontalMargin, bottom: currentInsets.bottom, right: horizontalMargin)
+        let bottom = LiquidGlass.isEnabled ? Self.bottomContentPadding : currentInsets.bottom
+        podcastsCollectionView.contentInset = UIEdgeInsets(top: currentInsets.top, left: horizontalMargin, bottom: bottom, right: horizontalMargin)
     }
 
     private func adjustSettingsForGridType() {
         updateInsets()
         gridHelper.configureLayout(collectionView: podcastsCollectionView)
         if let themeableCollectionView = podcastsCollectionView as? ThemeableCollectionView {
-            themeableCollectionView.style = Settings.libraryType() == .list ?  ThemeStyle.primaryUi04 : ThemeStyle.primaryUi02
+            themeableCollectionView.style = .primaryUi02
         }
+    }
+
+    /// Re-evaluates whether the custom bottom fade should be active for the current traits
+    /// and toggles it. Called on load and on trait changes so the fade follows the idiom
+    /// (e.g. an iPhone app resized on iPad / Mac).
+    ///
+    /// Scoped to iOS 26 only — a stopgap until iOS 27 is expected to render the system
+    /// scroll edge effect acceptably over the grid.
+    private func updateCustomBottomFade() {
+        guard isViewLoaded else { return }
+        if #available(iOS 26, *) { // Only on iOS 26 for now
+            if #unavailable(iOS 27) {
+                setCustomBottomFadeEnabled(LiquidGlass.isEnabled && traitCollection.userInterfaceIdiom == .phone)
+            }
+        }
+    }
+
+    /// Enables or disables a soft progressive fade edge at the bottom of the grid under
+    /// Liquid Glass on iPhone.
+    ///
+    /// The system scroll edge effect washes out over the colorful artwork grid, hurting the
+    /// readability of the floating tab bar / mini player. Instead we leave a gap below the
+    /// grid (see `updateBottomSpacing`) and draw a fade overlay that dissolves the artwork
+    /// into the grid's background for a consistently visible soft edge.
+    ///
+    /// Disabling restores the default layout and the system scroll edge effect.
+    @available(iOS 26, *)
+    private func setCustomBottomFadeEnabled(_ enabled: Bool) {
+        guard enabled != isBottomFadeEnabled else { return }
+        isBottomFadeEnabled = enabled
+
+        guard enabled else {
+            bottomFadeView.isHidden = true
+            collectionViewBottomConstraint.constant = 0
+            podcastsCollectionView.bottomEdgeEffect.isHidden = false
+            return
+        }
+
+        installBottomFadeViewIfNeeded()
+        bottomFadeView.isHidden = false
+        updateBottomFadeOvershoot()
+
+        // Size the gap below the grid and paint the exposed strip in the grid's own
+        // background color so the fade dissolves into it seamlessly.
+        updateBottomSpacing()
+        (view as? ThemeableView)?.style = .primaryUi02
+
+        podcastsCollectionView.bottomEdgeEffect.isHidden = true
+        updateBottomFadeColor()
+    }
+
+    /// Adds the fade overlay to the hierarchy the first time the fade is enabled, spanning
+    /// from the top of the bottom safe area to the grid's bottom edge. Later toggles just
+    /// show/hide it.
+    private func installBottomFadeViewIfNeeded() {
+        guard bottomFadeView.superview == nil else { return }
+
+        bottomFadeView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bottomFadeView)
+        // Start a bit above the bottom safe area (where the floating bar begins) so the fade
+        // is taller and eases in earlier. The overshoot is dropped when the bar collapses.
+        let topConstraint = bottomFadeView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Self.bottomFadeTopOvershoot)
+        bottomFadeTopConstraint = topConstraint
+        NSLayoutConstraint.activate([
+            bottomFadeView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomFadeView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topConstraint,
+            bottomFadeView.bottomAnchor.constraint(equalTo: podcastsCollectionView.bottomAnchor)
+        ])
+    }
+
+    /// The fade overshoots above the safe area only while the tab bar is expanded. When it
+    /// collapses to its compact pill there's less bar to cover, so drop the overshoot.
+    func updateBottomFadeOvershoot() {
+        guard isBottomFadeEnabled, let bottomFadeTopConstraint else { return }
+        let minimized = (tabBarController as? MainTabBarController)?.isTabBarMinimized ?? false
+        let constant = -(minimized ? 0 : Self.bottomFadeTopOvershoot)
+        guard bottomFadeTopConstraint.constant != constant else { return }
+        bottomFadeTopConstraint.constant = constant
+    }
+
+    /// Sizes the gap below the grid as a fraction of the current bottom safe area, so it
+    /// keeps clearing the floating bar / mini player.
+    private func updateBottomSpacing() {
+        guard isBottomFadeEnabled else { return }
+        collectionViewBottomConstraint.constant = max(16, view.safeAreaInsets.bottom * Self.bottomSpacingFraction)
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        updateBottomSpacing()
+    }
+
+    /// Fades the grid into its own background color, so the artwork dissolves cleanly
+    /// behind the floating bar in both themes.
+    private func updateBottomFadeColor() {
+        guard LiquidGlass.isEnabled else { return }
+        bottomFadeView.setColor(ThemeColor.primaryUi02())
     }
 
     @objc func refreshGridItems() {
@@ -295,23 +382,16 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
             guard let strongSelf = self else { return }
 
             let oldData = strongSelf.gridItems
-            let sortOption: LibrarySort
-            if !FeatureFlag.podcastsSortChanges.enabled, Settings.homeFolderSortOrder() == .recentlyPlayed {
-                Settings.setHomeFolderSortOrder(order: .dateAddedNewestToOldest)
-                sortOption = .dateAddedNewestToOldest
-            } else {
-                sortOption = Settings.homeFolderSortOrder()
-            }
-            var newData = HomeGridDataHelper.gridListItems(orderedBy: sortOption, badgeType: Settings.podcastBadgeType())
+            var newData = HomeGridDataHelper.gridListItems(orderedBy: Settings.homeFolderSortOrder, badgeType: Settings.podcastBadgeType)
 
             if newData.isEmpty {
                 newData = [HomeGridListItem.empty]
             }
 
             DispatchQueue.main.sync {
-                if strongSelf.gridLayout != Settings.libraryType() {
+                if strongSelf.gridLayout != Settings.libraryType {
                     strongSelf.podcastsCollectionView.reloadData()
-                    strongSelf.gridLayout = Settings.libraryType()
+                    strongSelf.gridLayout = Settings.libraryType
                 } else {
                     let stagedSet = StagedChangeset(source: oldData, target: newData)
                     strongSelf.podcastsCollectionView.reload(using: stagedSet, setData: { data in
@@ -321,15 +401,6 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
                 strongSelf.foldersCoordinator.showUpsellIfNeeded(from: strongSelf)
             }
         }
-    }
-
-    func showProfileController() {
-        let profileViewController = ProfileViewController()
-        self.navigationController?.pushViewController(profileViewController, animated: true)
-    }
-
-    @objc private func profileTapped(_ sender: UIBarButtonItem) {
-        showProfileController()
     }
 
     private lazy var foldersCoordinator: FoldersCoordinator = {
@@ -347,42 +418,38 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
     @objc private func podcastOptionsTapped(_ sender: UIBarButtonItem) {
         let optionsPicker = OptionsPicker(title: nil)
 
-        let sortOption: LibrarySort = if !FeatureFlag.podcastsSortChanges.enabled, Settings.homeFolderSortOrder() == .recentlyPlayed {
-            .dateAddedNewestToOldest
-        } else {
-            Settings.homeFolderSortOrder()
-        }
-        let sortAction = OptionAction(label: L10n.sortBy, secondaryLabel: sortOption.description, icon: "podcast-sort") { [weak self] in
-            self?.showSortOrderOptions()
+        let sortOption = Settings.homeFolderSortOrder
+        let sortAction = OptionAction(label: L10n.sortBy, secondaryLabel: sortOption.description, icon: "podcast-sort") {
             Analytics.track(.podcastsListModalOptionTapped, properties: ["option": "sort_by"])
         }
+        sortAction.submenu = { [weak self] in self?.makeSortOrderOptionsPicker() }
         optionsPicker.addAction(action: sortAction)
 
-        let largeGridAction = OptionAction(label: L10n.podcastsLargeGrid, icon: "podcastlist_largegrid", selected: Settings.libraryType() == .threeByThree) { [weak self] in
-            Settings.setLibraryType(.threeByThree)
+        let largeGridAction = OptionAction(label: L10n.podcastsLargeGrid, icon: "podcastlist_largegrid", selected: Settings.libraryType == .threeByThree) { [weak self] in
+            Settings.libraryType = .threeByThree
             self?.gridTypeChanged()
             Analytics.track(.podcastsListModalOptionTapped, properties: ["option": "layout"])
             Analytics.track(.podcastsListLayoutChanged, properties: ["layout": LibraryType.threeByThree])
         }
-        let smallGridAction = OptionAction(label: L10n.podcastsSmallGrid, icon: "podcastlist_smallgrid", selected: Settings.libraryType() == .fourByFour) { [weak self] in
-            Settings.setLibraryType(.fourByFour)
+        let smallGridAction = OptionAction(label: L10n.podcastsSmallGrid, icon: "podcastlist_smallgrid", selected: Settings.libraryType == .fourByFour) { [weak self] in
+            Settings.libraryType = .fourByFour
             self?.gridTypeChanged()
             Analytics.track(.podcastsListModalOptionTapped, properties: ["option": "layout"])
             Analytics.track(.podcastsListLayoutChanged, properties: ["layout": LibraryType.fourByFour])
         }
-        let listGridAction = OptionAction(label: L10n.podcastsList, icon: "podcastlist_listview", selected: Settings.libraryType() == .list) { [weak self] in
-            Settings.setLibraryType(.list)
+        let listGridAction = OptionAction(label: L10n.podcastsList, icon: "podcastlist_listview", selected: Settings.libraryType == .list) { [weak self] in
+            Settings.libraryType = .list
             self?.gridTypeChanged()
             Analytics.track(.podcastsListModalOptionTapped, properties: ["option": "layout"])
             Analytics.track(.podcastsListLayoutChanged, properties: ["layout": LibraryType.list])
         }
         optionsPicker.addSegmentedAction(name: L10n.podcastsLayout, icon: "podcastlist_largegrid", actions: [largeGridAction, smallGridAction, listGridAction])
 
-        let badgeType = Settings.podcastBadgeType()
-        let badgesAction = OptionAction(label: L10n.podcastsBadges, secondaryLabel: badgeType.description, icon: "badges") { [weak self] in
-            self?.showBadgeOptions()
+        let badgeType = Settings.podcastBadgeType
+        let badgesAction = OptionAction(label: L10n.podcastsBadges, secondaryLabel: badgeType.description, icon: "badges") {
             Analytics.track(.podcastsListModalOptionTapped, properties: ["option": "badges"])
         }
+        badgesAction.submenu = { [weak self] in self?.makeBadgeOptionsPicker() }
         optionsPicker.addAction(action: badgesAction)
 
         let shareAction = OptionAction(label: L10n.podcastsShare, icon: "podcast-share") {
@@ -394,7 +461,13 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
         }
         optionsPicker.addAction(action: shareAction)
 
-        optionsPicker.show(statusBarStyle: preferredStatusBarStyle)
+        let editAction = OptionAction(label: L10n.podcastsEdit, icon: "filter_manual_episode_order") { [weak self] in
+            self?.setEditingOrder(true)
+            Analytics.track(.podcastsListModalOptionTapped, properties: ["option": "edit"])
+        }
+        optionsPicker.addAction(action: editAction)
+
+        optionsPicker.present(from: self)
 
         Analytics.track(.podcastsListOptionsButtonTapped)
     }
@@ -405,20 +478,8 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
         SharingHelper.shared.shareLinkToPodcastList(name: listName, url: shareUrl, fromController: self, barButtonItem: customRightBtn, completionHandler: nil)
     }
 
-    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        gridHelper.handleLongPress(gesture, from: podcastsCollectionView, isList: Settings.libraryType() == .list, containerView: view)
-    }
-
     func itemCount() -> Int {
         gridItems.count
-    }
-
-    func podcastAt(indexPath: IndexPath) -> Podcast? {
-        gridItems[safe: indexPath.row]?.podcast
-    }
-
-    func folderAt(indexPath: IndexPath) -> Folder? {
-        gridItems[safe: indexPath.row]?.folder
     }
 
     func itemAt(indexPath: IndexPath) -> HomeGridListItem? {
@@ -430,15 +491,15 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
         adjustSettingsForGridType()
     }
 
-    private func showBadgeOptions() {
+    private func makeBadgeOptionsPicker() -> OptionsPicker {
         let options = OptionsPicker(title: L10n.podcastsBadges.localizedUppercase)
 
-        let badgeOption = Settings.podcastBadgeType()
+        let badgeOption = Settings.podcastBadgeType
 
         let badgeOffAction = OptionAction(label: BadgeType.off.description, selected: badgeOption == .off) { [weak self] in
             guard let strongSelf = self else { return }
 
-            Settings.setPodcastBadgeType(.off)
+            Settings.podcastBadgeType = .off
             strongSelf.refreshGridItems()
             Analytics.track(.podcastsListBadgesChanged, properties: ["type": BadgeType.off])
         }
@@ -447,7 +508,7 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
         let latestEpisodeAction = OptionAction(label: BadgeType.allUnplayed.description, selected: badgeOption == .allUnplayed) { [weak self] in
             guard let strongSelf = self else { return }
 
-            Settings.setPodcastBadgeType(.allUnplayed)
+            Settings.podcastBadgeType = .allUnplayed
             strongSelf.refreshGridItems()
             Analytics.track(.podcastsListBadgesChanged, properties: ["type": BadgeType.allUnplayed])
         }
@@ -456,18 +517,19 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
         let unplayedCountAction = OptionAction(label: BadgeType.latestEpisode.description, selected: badgeOption == .latestEpisode) { [weak self] in
             guard let strongSelf = self else { return }
 
-            Settings.setPodcastBadgeType(.latestEpisode)
+            Settings.podcastBadgeType = .latestEpisode
             strongSelf.refreshGridItems()
             Analytics.track(.podcastsListBadgesChanged, properties: ["type": BadgeType.latestEpisode])
         }
         options.addAction(action: unplayedCountAction)
 
-        options.show(statusBarStyle: preferredStatusBarStyle)
+        return options
     }
 
     override func handleThemeChanged() {
         super.handleThemeChanged()
         podcastsCollectionView.reloadData()
+        updateBottomFadeColor()
     }
 
     private func setupBannerAd(promotion: BlazePromotion, shouldAnimate: Bool) {
@@ -498,15 +560,10 @@ class PodcastListViewController: PCViewController, UIGestureRecognizerDelegate, 
 // MARK: - Refresh Control
 
 extension PodcastListViewController {
-    private func setupRefreshControl() {
-        guard let navController = navigationController else {
-            return
-        }
-
-        refreshControl = PCRefreshControl(scrollView: podcastsCollectionView,
-                                          navBar: navController.navigationBar,
-                                          searchBar: searchController,
-                                          source: .podcastsList)
+    func setupRefreshControl() {
+        let controller = FullSyncRefreshController(source: .podcastsList)
+        podcastsCollectionView.refreshControl = controller.refreshControl
+        self.refreshController = controller
     }
 }
 

@@ -3,6 +3,7 @@ import PocketCastsServer
 import UIKit
 import PocketCastsUtils
 
+@MainActor
 class SharingHelper: NSObject {
     static let shared = SharingHelper()
     var activityController: UIActivityViewController?
@@ -22,7 +23,7 @@ class SharingHelper: NSObject {
         guard let sharingUrl = URL(string: ServerConstants.Urls.pocketcastsDotCom) else { return }
 
         activityController = UIActivityViewController(activityItems: [L10n.appShareText, sharingUrl], applicationActivities: nil)
-        guard let activityController = activityController else { return }
+        guard let activityController else { return }
 
         activityController.completionWithItemsHandler = nil
 
@@ -35,6 +36,11 @@ class SharingHelper: NSObject {
     }
 
     func shareLinkTo(podcast: Podcast, fromController: UIViewController, fromSource: AnalyticsSource, barButtonItem: UIBarButtonItem?) {
+        guard !podcast.isPrivate else {
+            Toast.show(L10n.sharePodcastPrivateNotAvailable)
+            return
+        }
+
         AnalyticsHelper.sharedPodcast()
 
         SharingModal.show(option: .podcast(podcast), from: fromSource, in: fromController)
@@ -46,7 +52,7 @@ class SharingHelper: NSObject {
         activityController = UIActivityViewController(activityItems: [URL(string: url)!], applicationActivities: nil)
         activityController?.completionWithItemsHandler = nil
 
-        guard let activityController = activityController else { return }
+        guard let activityController else { return }
 
         fromController.present(activityController, animated: true) {
             completionHandler?()
@@ -62,20 +68,6 @@ class SharingHelper: NSObject {
     func shareLinkTo(episode: Episode, shareTime: TimeInterval, fromController: UIViewController, sourceRect: CGRect, sourceView: UIView?, showArrow: Bool = true, fromSource: AnalyticsSource, analyticsType: String = "episode") {
         let option: SharingModal.Option = shareTime == 0 ? .episode(episode) : .currentPosition(episode, shareTime)
         SharingModal.show(option: option, from: fromSource, in: fromController)
-    }
-
-    func createActivityController(episode: Episode, shareTime: TimeInterval) -> UIActivityViewController {
-        var sharingUrl = episode.shareURL
-        if shareTime > 0 {
-            AnalyticsHelper.sharedEpisodeWithTimestamp()
-            sharingUrl += "?t=\(round(episode.playedUpTo))"
-        } else {
-            AnalyticsHelper.sharedEpisode()
-        }
-
-        let activityController = UIActivityViewController(activityItems: [URL(string: sharingUrl)!], applicationActivities: nil)
-        activityController.completionWithItemsHandler = nil
-        return activityController
     }
 }
 

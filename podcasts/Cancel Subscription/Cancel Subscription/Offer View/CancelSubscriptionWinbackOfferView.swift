@@ -1,4 +1,5 @@
 import SwiftUI
+import EndOfYear
 
 struct CancelSubscriptionWinbackOfferView: View {
     @EnvironmentObject var theme: Theme
@@ -99,26 +100,9 @@ struct CancelSubscriptionWinbackOfferView: View {
         Analytics.track(.winbackWinbackOfferCancelButtonTapped)
         viewModel.showManageSubscriptions()
     }
-
-    private func icon(for themeType: Theme.ThemeType) -> Image {
-        let name: String
-        switch themeType {
-        case .classic, .rosé:
-            name = "cs-sparkle-red"
-        case .indigo:
-            name = "cs-sparkle-indigo"
-        case .contrastLight:
-            name = "cs-sparkle-black"
-        case .contrastDark:
-            name = "cs-sparkle-gray"
-        default:
-            name = "cs-sparkle-blue"
-        }
-        return Image(name)
-    }
 }
 
 #Preview {
     CancelSubscriptionOfferSuccessView(viewModel: CancelSubscriptionViewModel(navigationController: UINavigationController()))
-        .environmentObject(Theme.sharedTheme)
+        .environmentObject(Theme.shared)
 }

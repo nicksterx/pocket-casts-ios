@@ -8,56 +8,37 @@ extension PodcastListViewController: UIScrollViewDelegate, PCSearchBarDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // The tab bar collapses/expands as the grid scrolls, so keep the fade's overshoot in
+        // step with it. Cheap: only mutates the constraint when the collapsed state flips.
+        updateBottomFadeOvershoot()
+
         guard searchControllerView?.superview == nil else { return } // don't send scroll events while the search results are up
 
         searchController.parentScrollViewDidScroll(scrollView)
-        refreshControl?.scrollViewDidScroll(scrollView)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         guard searchControllerView?.superview == nil else { return } // don't send scroll events while the search results are up
 
         searchController.parentScrollViewDidEndDragging(scrollView, willDecelerate: decelerate)
-        refreshControl?.scrollViewDidEndDragging(scrollView)
     }
 
     func setupSearchBar() {
         searchController = PCSearchBarController()
-
-        searchController.view.translatesAutoresizingMaskIntoConstraints = false
-        addChild(searchController)
-        view.addSubview(searchController.view)
-        searchController.didMove(toParent: self)
-
-        let topAnchor = searchController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: -PCSearchBarController.defaultHeight)
-        NSLayoutConstraint.activate([
-            searchController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            searchController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            searchController.view.heightAnchor.constraint(equalToConstant: PCSearchBarController.defaultHeight),
-            topAnchor
-        ])
-        searchController.searchControllerTopConstant = topAnchor
-
-        searchController.setupScrollView(podcastsCollectionView, hideSearchInitially: false)
+        searchController.install(in: self, attachedTo: podcastsCollectionView)
         searchController.searchDebounce = Settings.podcastSearchDebounceTime()
         searchController.searchDelegate = self
     }
 
-    func showSortOrderOptions() {
+    func makeSortOrderOptionsPicker() -> OptionsPicker {
         let options = OptionsPicker(title: L10n.sortBy.localizedUppercase)
 
-        let sortOption: LibrarySort
-        if !FeatureFlag.podcastsSortChanges.enabled, Settings.homeFolderSortOrder() == .recentlyPlayed {
-            Settings.setHomeFolderSortOrder(order: .dateAddedNewestToOldest)
-            sortOption = .dateAddedNewestToOldest
-        } else {
-            sortOption = Settings.homeFolderSortOrder()
-        }
+        let sortOption = Settings.homeFolderSortOrder
 
         let podcastNameAction = OptionAction(label: LibrarySort.titleAtoZ.description, selected: sortOption == .titleAtoZ) { [weak self] in
             guard let strongSelf = self else { return }
 
-            Settings.setHomeFolderSortOrder(order: .titleAtoZ)
+            Settings.homeFolderSortOrder = .titleAtoZ
             strongSelf.refreshGridItems()
             Analytics.track(.podcastsListSortOrderChanged, properties: ["sort_by": LibrarySort.titleAtoZ])
         }
@@ -65,7 +46,7 @@ extension PodcastListViewController: UIScrollViewDelegate, PCSearchBarDelegate {
         let releaseDateAction = OptionAction(label: LibrarySort.episodeDateNewestToOldest.description, selected: sortOption == .episodeDateNewestToOldest) { [weak self] in
             guard let strongSelf = self else { return }
 
-            Settings.setHomeFolderSortOrder(order: .episodeDateNewestToOldest)
+            Settings.homeFolderSortOrder = .episodeDateNewestToOldest
             strongSelf.refreshGridItems()
             Analytics.track(.podcastsListSortOrderChanged, properties: ["sort_by": LibrarySort.episodeDateNewestToOldest])
         }
@@ -73,7 +54,7 @@ extension PodcastListViewController: UIScrollViewDelegate, PCSearchBarDelegate {
         let subscribedOrder = OptionAction(label: LibrarySort.dateAddedNewestToOldest.description, selected: sortOption == .dateAddedNewestToOldest) { [weak self] in
             guard let strongSelf = self else { return }
 
-            Settings.setHomeFolderSortOrder(order: .dateAddedNewestToOldest)
+            Settings.homeFolderSortOrder = .dateAddedNewestToOldest
             strongSelf.refreshGridItems()
             Analytics.track(.podcastsListSortOrderChanged, properties: ["sort_by": LibrarySort.dateAddedNewestToOldest])
         }
@@ -81,7 +62,7 @@ extension PodcastListViewController: UIScrollViewDelegate, PCSearchBarDelegate {
         let dragAndDropAction = OptionAction(label: LibrarySort.custom.description, selected: sortOption == .custom) { [weak self] in
             guard let strongSelf = self else { return }
 
-            Settings.setHomeFolderSortOrder(order: .custom)
+            Settings.homeFolderSortOrder = .custom
             strongSelf.refreshGridItems()
             Analytics.track(.podcastsListSortOrderChanged, properties: ["sort_by": LibrarySort.custom])
         }
@@ -89,25 +70,18 @@ extension PodcastListViewController: UIScrollViewDelegate, PCSearchBarDelegate {
         let recentlyPlayedOrder = OptionAction(label: LibrarySort.recentlyPlayed.description, selected: sortOption == .recentlyPlayed) { [weak self] in
             guard let strongSelf = self else { return }
 
-            Settings.setHomeFolderSortOrder(order: .recentlyPlayed)
+            Settings.homeFolderSortOrder = .recentlyPlayed
             strongSelf.refreshGridItems()
             Analytics.track(.podcastsListSortOrderChanged, properties: ["sort_by": LibrarySort.recentlyPlayed])
         }
 
-        if FeatureFlag.podcastsSortChanges.enabled {
-            options.addAction(action: subscribedOrder)
-            options.addAction(action: releaseDateAction)
-            options.addAction(action: recentlyPlayedOrder)
-            options.addAction(action: podcastNameAction)
-            options.addAction(action: dragAndDropAction)
-        } else {
-            options.addAction(action: podcastNameAction)
-            options.addAction(action: releaseDateAction)
-            options.addAction(action: subscribedOrder)
-            options.addAction(action: dragAndDropAction)
-        }
+        options.addAction(action: subscribedOrder)
+        options.addAction(action: releaseDateAction)
+        options.addAction(action: recentlyPlayedOrder)
+        options.addAction(action: podcastNameAction)
+        options.addAction(action: dragAndDropAction)
 
-        options.show(statusBarStyle: preferredStatusBarStyle)
+        return options
     }
 
     // MARK: - PCSearchBarDelegate

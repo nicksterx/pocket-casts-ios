@@ -1,5 +1,7 @@
+import Foundation
 import PocketCastsDataModel
 import PocketCastsServer
+import PocketCastsUtils
 import DifferenceKit
 
 class EpisodesDataManager {
@@ -9,12 +11,12 @@ class EpisodesDataManager {
     func episodes(for playlist: AutoplayHelper.Playlist) -> [BaseEpisode] {
         switch playlist {
         case .podcast(uuid: let uuid):
-            if let podcast = DataManager.sharedManager.findPodcast(uuid: uuid, includeUnsubscribed: true) {
+            if let podcast = DataManager.shared.findPodcast(uuid: uuid, includeUnsubscribed: true) {
                 return episodes(for: podcast).flatMap { $0.elements.compactMap { ($0 as? ListEpisode)?.episode } }
             }
         case .filter(uuid: let uuid):
-            if let filter = DataManager.sharedManager.findPlaylist(uuid: uuid) {
-                return episodes(for: filter).map { $0.episode }
+            if let filter = DataManager.shared.findPlaylist(uuid: uuid) {
+                return playlistEpisodes(for: filter).map { $0.episode }
             }
         case .downloads:
             return downloadedEpisodes().flatMap { $0.elements.map { $0.episode } }
@@ -124,7 +126,7 @@ class EpisodesDataManager {
         }
 
         var whereClauses = ["podcast_id = \(podcast.id)", "wasDeleted = 0"]
-        if !podcast.shouldShowArchived {
+        if !podcast.showArchived {
             whereClauses.append("archived = 0")
         }
         if let uuids = uuidsToFilter { // ignore uuid filtering if uuid list is empty or nil
@@ -136,12 +138,6 @@ class EpisodesDataManager {
     }
 
     // MARK: - Playlists
-
-    func episodes(for filter: EpisodeFilter, limit: Int = Constants.Limits.maxFilterItems) -> [ListEpisode] {
-        let query = PlaylistQueryBuilder.queryFor(filter: filter, episodeUuidToAdd: filter.episodeUuidToAddToQueries(), limit: limit)
-        let tintColor = filter.playlistColor()
-        return EpisodeTableHelper.loadEpisodes(tintColor: tintColor, query: query, arguments: nil)
-    }
 
     func playlistEpisodes(
         for playlist: EpisodeFilter,
@@ -202,12 +198,12 @@ class EpisodesDataManager {
     // MARK: - Uploaded Files
 
     func uploadedEpisodes() -> [UserEpisode] {
-        let sortBy = UploadedSort(rawValue: Settings.userEpisodeSortBy()) ?? UploadedSort.newestToOldest
+        let sortBy = UploadedSort(rawValue: Settings.userEpisodeSortBy) ?? UploadedSort.newestToOldest
 
         if SubscriptionHelper.hasActiveSubscription() {
-            return DataManager.sharedManager.allUserEpisodes(sortedBy: sortBy)
+            return DataManager.shared.allUserEpisodes(sortedBy: sortBy)
         } else {
-            return DataManager.sharedManager.allUserEpisodesDownloaded(sortedBy: sortBy)
+            return DataManager.shared.allUserEpisodesDownloaded(sortedBy: sortBy)
         }
     }
 }

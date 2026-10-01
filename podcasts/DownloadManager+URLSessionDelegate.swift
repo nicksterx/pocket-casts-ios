@@ -5,7 +5,7 @@ import PocketCastsUtils
 
 extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
     // things smaller than 10kbs are not episodes, way too small and something has gone wrong
-    private static let badEpisodeSize = 10 * 1024
+    static let badEpisodeSize = 10 * 1024
 
     // things smaller than 150kb are suspect, probably text, xml or html error pages
     private static let suspectEpisodeSize = 150 * 1024
@@ -13,12 +13,15 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
     // make sure to call the completion handler on the main queue, otherwise it will crash
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
 #if os(watchOS)
+        guard session.configuration.identifier == DownloadManager.cellBackgroundSessionId else { return }
+
         DispatchQueue.main.async { [weak self] in
             guard let self, let task = pendingWatchBackgroundTask else { return }
 
+            pendingWatchBackgroundTask = nil
             task.setTaskCompletedWithSnapshot(true)
         }
-#elseif APPCLIP
+#elseif APPCLIP || os(tvOS)
         //TODO: Check this and see whether anything should be done
 #else
         DispatchQueue.main.async { [weak self] in
@@ -31,11 +34,11 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard let downloadingEpisode = episodeForTask(downloadTask, forceReload: false) else { return }
+        guard let downloadingEpisode = episode(for: downloadTask, forceReload: false) else { return }
 
         let downloadingToStream = downloadingEpisode.autoDownloadStatus == AutoDownloadStatus.playerDownloadedForStreaming.rawValue
         if !downloadingToStream {
-            progressManager.updateProgressForEpisode(downloadingEpisode.uuid, totalBytesWritten: totalBytesWritten, totalBytesExpected: totalBytesExpectedToWrite)
+            progressManager.updateProgress(forEpisodeUuid: downloadingEpisode.uuid, totalBytesWritten: totalBytesWritten, totalBytesExpected: totalBytesExpectedToWrite)
         }
 
         // If our download status or downloadTaskId are incorrect, then we should update these
@@ -51,7 +54,7 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
                 } else {
                     dataManager.saveEpisode(downloadStatus: .downloading, sizeInBytes: totalBytesExpectedToWrite, episode: downloadingEpisode)
                 }
-                progressManager.updateStatusForEpisode(downloadingEpisode.uuid, status: .downloading)
+                progressManager.updateStatus(forEpisodeUuid: downloadingEpisode.uuid, status: .downloading)
             }
         }
     }
@@ -66,12 +69,12 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
             return
         }
 
-        progressManager.updateProgressForEpisode(downloadingEpisode.uuid, totalBytesWritten: totalBytesWritten, totalBytesExpected: totalBytesExpectedToWrite)
+        progressManager.updateProgress(forEpisodeUuid: downloadingEpisode.uuid, totalBytesWritten: totalBytesWritten, totalBytesExpected: totalBytesExpectedToWrite)
 
         // If our download status or downloadTaskId are incorrect, then we should update these
         if !downloadingEpisode.downloading() || downloadingEpisode.downloadTaskId == nil {
             dataManager.saveEpisode(downloadStatus: .downloading, sizeInBytes: totalBytesExpectedToWrite, episode: downloadingEpisode)
-            progressManager.updateStatusForEpisode(downloadingEpisode.uuid, status: .downloading)
+            progressManager.updateStatus(forEpisodeUuid: downloadingEpisode.uuid, status: .downloading)
         }
     }
 
@@ -84,7 +87,7 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
         }
 
         // Check for downloads that were cancelled
-        guard let episode = episodeForTask(downloadTask, forceReload: true) else {
+        guard let episode = episode(for: downloadTask, forceReload: true) else {
             downloadAttempts.removeValue(forKey: downloadTask.taskIdentifier)
             return
         }
@@ -116,10 +119,8 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
             return
         case NSURLErrorTimedOut:
             FileLog.shared.addMessage("DownloadManager: Download timed out for episode \(episode.displayableTitle()), session: \(sessionType), network: \(networkDescription)")
-            taskFailure[episode.uuid] = .connectionTimeout
         case NSURLErrorCannotConnectToHost:
             FileLog.shared.addMessage("DownloadManager: Cannot connect to host for episode \(episode.displayableTitle()), session: \(sessionType), network: \(networkDescription)")
-            taskFailure[episode.uuid] = .unknownHost
         case NSURLErrorNotConnectedToInternet:
             FileLog.shared.addMessage("DownloadManager: Not connected to internet for episode \(episode.displayableTitle()), session: \(sessionType)")
         default:
@@ -127,6 +128,7 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
         }
 
         downloadAttempts.removeValue(forKey: downloadTask.taskIdentifier)
+        downloadingEpisodesCache[episode.downloadTaskId ?? episode.uuid] = nil
 
         dataManager.saveEpisode(downloadStatus: .downloadFailed, downloadError: error.localizedDescription, downloadTaskId: nil, episode: episode)
 
@@ -134,14 +136,16 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        downloadAttempts.removeValue(forKey: downloadTask.taskIdentifier)
-
-        guard let episode = episodeForTask(downloadTask, forceReload: true) else { return }
+        guard let episode = episode(for: downloadTask, forceReload: true) else {
+            downloadAttempts.removeValue(forKey: downloadTask.taskIdentifier)
+            return
+        }
 
         removeEpisodeFromCache(episode)
         guard let response = downloadTask.response as? HTTPURLResponse else {
             // invalid download since we can't check things like the status code and headers if it's not a HTTPURLResponse
             markEpisode(episode, asFailedWithMessage: L10n.downloadFailed, reason: .badResponse)
+            downloadAttempts.removeValue(forKey: downloadTask.taskIdentifier)
             return
         }
 
@@ -153,7 +157,7 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
                 }
                 return
             }
-
+            downloadAttempts.removeValue(forKey: downloadTask.taskIdentifier)
             let message: String
             if response.statusCode == ServerConstants.HttpConstants.notFound {
                 message = L10n.downloadErrorContactAuthorVersion2
@@ -165,19 +169,15 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
             markEpisode(episode, asFailedWithMessage: message, reason: .statusCode(response.statusCode))
             return
         }
-
+        downloadAttempts.removeValue(forKey: downloadTask.taskIdentifier)
         let responseContentType = response.allHeaderFields[ServerConstants.HttpHeaders.contentType] as? String
         processEpisode(episode, downloadedFile: location, reportedContentType: responseContentType, copyFile: false)
     }
 
     func processEpisode(_ episode: BaseEpisode, downloadedFile location: URL, reportedContentType: String?, copyFile: Bool) {
-        var contentType = reportedContentType
-
-        if FeatureFlag.useMimetypePackage.enabled {
-            contentType = MimetypeHelper.contetType(for: location)
-            if let contentType, contentType != episode.contentType {
-                DataManager.sharedManager.saveEpisode(contentType: contentType, episode: episode)
-            }
+        let contentType = MimetypeHelper.contetType(for: location)
+        if let contentType, contentType != episode.contentType {
+            DataManager.shared.saveEpisode(contentType: contentType, episode: episode)
         }
 
         let fileSize = FileManager.default.fileSize(of: location) ?? 0
@@ -190,7 +190,7 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
         }
 
         let autoDownloadStatus = AutoDownloadStatus(rawValue: episode.autoDownloadStatus)!
-        let destinationPath = autoDownloadStatus == .playerDownloadedForStreaming ? streamingBufferPathForEpisode(episode) : pathForEpisode(episode)
+        let destinationPath = autoDownloadStatus == .playerDownloadedForStreaming ? streamingBufferPath(for: episode) : path(for: episode)
         let destinationUrl = URL(fileURLWithPath: destinationPath)
 
         do {
@@ -217,11 +217,45 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
         guard let downloadTask = task as? URLSessionDownloadTask,
-              let episode = episodeForTask(downloadTask, forceReload: false) else {
+              let episode = episode(for: downloadTask, forceReload: false) else {
             return
         }
 
-        if let failure = taskFailure[episode.uuid] {
+        // Track network data usage
+        if FeatureFlag.trackNetworkDataUsage.enabled {
+            let bytesReceived = task.countOfBytesReceived
+            let connectionType = NetworkDataUsageManager.connectionType(from: metrics)
+
+            if bytesReceived > 0 {
+                let autoDownloadStatus = AutoDownloadStatus(rawValue: episode.autoDownloadStatus)
+                let operationType: NetworkDataUsageManager.OperationType
+                switch autoDownloadStatus {
+                case .playerDownloadedForStreaming:
+                    operationType = .stream
+                default:
+                    operationType = .download
+                }
+
+                let sessionType: NetworkDataUsageManager.SessionType =
+                    session === wifiOnlyBackgroundSession ? .background :
+                    (session === cellularBackgroundSession ? .background : .foreground)
+
+                let bytesDownloaded = operationType != .stream ? bytesReceived : 0
+                let bytesStreamed = operationType == .stream ? bytesReceived : 0
+
+                dataManager.networkDataUsageManager.add(
+                    episodeUuid: episode.uuid,
+                    podcastUuid: episode.parentIdentifier(),
+                    bytesDownloaded: bytesDownloaded,
+                    bytesStreamed: bytesStreamed,
+                    operationType: operationType,
+                    connectionType: connectionType,
+                    sessionType: sessionType
+                )
+            }
+        }
+
+        if let failure = taskFailure[episode.uuid] ?? failureReason(for: task.error) {
             logDownload(episode, failure: failure, metrics: metrics, session: session)
             taskFailure.removeValue(forKey: episode.uuid)
         }
@@ -230,7 +264,7 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
         downloadingEpisodesCache[taskId] = nil
     }
 
-    private func episodeForTask(_ task: URLSessionDownloadTask, forceReload: Bool) -> BaseEpisode? {
+    private func episode(for task: URLSessionDownloadTask, forceReload: Bool) -> BaseEpisode? {
         guard let taskDescription = task.taskDescription else { return nil }
 
         if !forceReload {
@@ -240,7 +274,7 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
         }
 
         let episode = dataManager.findBaseEpisode(downloadTaskId: taskDescription)
-        if let episode = episode {
+        if let episode {
             downloadingEpisodesCache[taskDescription] = episode
         }
 
@@ -295,6 +329,17 @@ extension DownloadManager: URLSessionDelegate, URLSessionDownloadDelegate {
         NotificationCenter.postOnMainThread(notification: Constants.Notifications.episodeDownloadStatusChanged, object: episode.uuid)
 
         taskFailure[episode.uuid] = reason
+    }
+
+    private func failureReason(for error: Error?) -> FailureReason? {
+        switch (error as NSError?)?.code {
+        case NSURLErrorTimedOut:
+            return .connectionTimeout
+        case NSURLErrorCannotConnectToHost:
+            return .unknownHost
+        default:
+            return nil
+        }
     }
 
     private func shouldRetryWithoutUserAgent(task: URLSessionDownloadTask) -> Bool {

@@ -2,6 +2,7 @@ import Foundation
 import PocketCastsDataModel
 import PocketCastsServer
 import PocketCastsUtils
+import SJUtils
 import WatchKit
 
 class WatchSyncManager {
@@ -18,6 +19,7 @@ class WatchSyncManager {
         NotificationCenter.default.addObserver(self, selector: #selector(checkSubscriptionStatus), name: WatchConstants.Notifications.loginStatusUpdated, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(subscriptionStatusUpdated), name: Notification.Name(rawValue: ServerNotifications.subscriptionStatusChanged.rawValue), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleContextUpdate), name: WatchConstants.Notifications.dataUpdated, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(playbackPaused), name: Constants.Notifications.playbackPaused, object: nil)
     }
 
     deinit {
@@ -32,7 +34,6 @@ class WatchSyncManager {
         if uniqueId?.count ?? 0 < 1 {
             let uuid = UUID().uuidString
             defaults.set(uuid, forKey: Constants.UserDefaults.appId)
-            defaults.synchronize()
         }
 
         ServerConfig.shared.syncDelegate = self
@@ -80,10 +81,13 @@ class WatchSyncManager {
     }
 
     @objc func handleContextUpdate() {
-        if FeatureFlag.watchUpNextSyncFix.enabled {
+        if FeatureFlag.watchUpNextSyncFix.enabled,
+           WKApplication.shared().applicationState != .background {
             // Debounce context updates to allow watch to fully process phone's changes
             // before deciding whether to sync. This prevents the watch from sending
             // stale Up Next data that could overwrite recent phone changes.
+            // Only debounce in foreground — in background, the system's execution window
+            // is tied to setTaskCompletedWithSnapshot, so we must process immediately.
             contextUpdateDebouncer.call()
         } else {
             processContextUpdate()
@@ -100,8 +104,8 @@ class WatchSyncManager {
                 comparisonResult: compareUpNextLists(),
                 isFirstSyncInProgress: SyncManager.isFirstSyncInProgress()
             ) {
-               let subscribedPodcasts = DataManager.sharedManager.allPodcasts(includeUnsubscribed: false)
-               BackgroundSyncManager.shared.performBackgroundRefresh(subscribedPodcasts: subscribedPodcasts)
+               let subscribedPodcasts = DataManager.shared.allPodcasts(includeUnsubscribed: false)
+               BackgroundSyncManager.shared.performBackgroundRefreshSafely(subscribedPodcasts: subscribedPodcasts)
             } else {
                 loginAndRefreshIfRequired()
             }
@@ -143,28 +147,26 @@ class WatchSyncManager {
     }
 
     func login() {
-        Task {
+        Task { @MainActor in
             do {
                 try await AuthenticationHelper.refreshLogin()
-                DispatchQueue.main.async {
-                    self.handleLogin()
-                }
+                handleLogin()
             }
             catch {
-                DispatchQueue.main.async {
-                    self.handleError(error)
-                }
+                handleError(error)
             }
         }
     }
 
+    @MainActor
     private func handleLogin() {
         FileLog.shared.addMessage("Login successful")
-        self.checkSubscriptionStatus()
+        checkSubscriptionStatus()
         NotificationCenter.default.post(name: WatchConstants.Notifications.loginStatusUpdated, object: nil)
         NotificationCenter.default.post(name: .userLoginDidChange, object: nil)
     }
 
+    @MainActor
     private func handleError(_ error: Error) {
         let error = error as? APIError
 
@@ -247,16 +249,16 @@ class WatchSyncManager {
         guard let podcastSettings = data[WatchConstants.Keys.podcastSettings] as? [[String: Any]] else { return }
 
         for podcastSetting in podcastSettings {
-            guard let podcastUuid = podcastSetting[WatchConstants.Keys.podcastUuid] as? String, let podcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid) else { continue }
+            guard let podcastUuid = podcastSetting[WatchConstants.Keys.podcastUuid] as? String, let podcast = DataManager.shared.findPodcast(uuid: podcastUuid) else { continue }
 
             if let overrideGlobalArchive = podcastSetting[WatchConstants.Keys.podcastOverrideGlobalArchive] as? Bool {
-                podcast.isAutoArchiveOverridden = overrideGlobalArchive
+                podcast.overrideGlobalArchive = overrideGlobalArchive
             }
 
             if let autoArchivePlayedAfter = podcastSetting[WatchConstants.Keys.podcastAutoArchivePlayedAfter] as? TimeInterval {
-                podcast.autoArchivePlayedAfterTime = autoArchivePlayedAfter
+                podcast.autoArchivePlayedAfter = autoArchivePlayedAfter
             }
-            DataManager.sharedManager.save(podcast: podcast)
+            DataManager.shared.save(podcast: podcast)
         }
     }
 
@@ -289,6 +291,21 @@ class WatchSyncManager {
         syncThenNotifyPhone(significantChange: false, syncRequired: true)
     }
 
+    /// When the watch pauses, push the new playback position straight to the phone so it updates
+    /// without a manual refresh. This is a cheap WatchConnectivity message — no extra server work:
+    /// `recordPlaybackPosition` already uploaded the position via `ApiServerHandler.saveUpTo`, and the
+    /// phone re-marks the episode dirty when it applies this, so other devices still converge normally.
+    @objc private func playbackPaused() {
+        guard FeatureFlag.watchPlaybackProgressLocalSync.enabled,
+              SyncManager.isUserLoggedIn(),
+              let episode = PlaybackManager.shared.currentEpisode else { return }
+
+        FileLog.shared.addMessage("WatchSync: pushing playback progress \(episode.playedUpTo) to phone for \(episode.uuid)")
+        SessionManager.shared.sendPlaybackProgress(episodeUuid: episode.uuid,
+                                                   playedUpTo: episode.playedUpTo,
+                                                   modifiedAt: episode.playedUpToModified)
+    }
+
     @objc private func syncCompleted() {
         checkForUpNextAutoDownloads()
         sendPendingChangeMessage()
@@ -318,5 +335,22 @@ class WatchSyncManager {
 
     func isPlusUser() -> Bool {
         SyncManager.isUserLoggedIn() && SubscriptionHelper.hasActiveSubscription()
+    }
+}
+
+extension BackgroundSyncManager {
+    /// Runs `performBackgroundRefresh` while guarding against the Objective-C `NSGenericException`
+    /// ("Task created in a session that has been invalidated") that `URLSession.downloadTask(with:)`
+    /// can raise when the system has invalidated a freshly created background session — typically
+    /// because the watch app is being suspended as the refresh starts. That exception originates in
+    /// Foundation and can't be caught with Swift's `do/catch`, so without this guard it crashes the app.
+    func performBackgroundRefreshSafely(subscribedPodcasts: [Podcast]) {
+        do {
+            try SJCommonUtils.catchException {
+                self.performBackgroundRefresh(subscribedPodcasts: subscribedPodcasts)
+            }
+        } catch {
+            FileLog.shared.addMessage("Skipped background refresh, URLSession was invalidated: \(error.localizedDescription)")
+        }
     }
 }

@@ -1,5 +1,4 @@
 import AutomatticEncryptedLogs
-import Combine
 import Foundation
 import PocketCastsUtils
 import SwiftUI
@@ -14,7 +13,7 @@ struct EventLoggingDataProvider: EventLoggingDataSource {
     }
 }
 
-extension FileLog: EventLoggingDelegate {
+extension FileLog: @retroactive EventLoggingDelegate {
     static let genericErrorMessage = "No log file uploaded: Error generating logs"
 
     static let noWearableLogsAvailable = "No wearable logs were available"
@@ -27,40 +26,38 @@ extension FileLog: EventLoggingDelegate {
             let eventLogging = EventLogging(dataSource: dataProvider, delegate: self)
             try eventLogging.enqueueLogForUpload(log: logFile)
         } catch {
+            addMessage("FileLog: failed to queue \(logFilePath.lastPathComponent) for upload: \(error)")
             throw LogError.logGenerationFailed
         }
 
+        addMessage("FileLog: queued \(logFilePath.lastPathComponent) for upload as \(logFile.uuid)")
         return logFile.uuid
     }
 
-    public func encryptedLogUUID() -> AnyPublisher<String, Never> {
-        logFileForUpload()
-            .tryMap { [unowned self] filePath in
-                try self.queueFileUpload(filePath)
-            }
-            .replaceError(with: FileLog.genericErrorMessage)
-            .eraseToAnyPublisher()
+    public func encryptedLogUUID() async -> String {
+        do {
+            return try queueFileUpload(try await logFileForUpload())
+        } catch {
+            addMessage("FileLog: failed to generate the log for upload: \(error)")
+            return FileLog.genericErrorMessage
+        }
     }
 
-    func watchLogFileForUpload() -> AnyPublisher<String?, Never> {
-        Future<String?, Error> { promise in
-            WatchManager.shared.requestLogFile { watchLog in
-                guard let wearableLog = watchLog else {
-                    promise(.success(nil))
-                    return
-                }
-                let file = LogFilePaths.watchUploadLog
-                do {
-                    try wearableLog.write(toFile: file, atomically: true, encoding: String.Encoding.utf8)
-                } catch {
-                    promise(.failure(LogError.logGenerationFailed))
-                }
-
-                promise(.success(file))
-            }
+    /// Writes the watchOS log to a file to be enqueued for upload, returning the path it was written
+    /// to, or `nil` if the watch had no logs to give.
+    func watchLogFileForUpload() async throws -> String? {
+        guard let wearableLog = await WatchManager.shared.requestLogFile() else {
+            return nil
         }
-        .replaceError(with: FileLog.genericErrorMessage)
-        .eraseToAnyPublisher()
+
+        let file = LogFilePaths.watchUploadLog
+        do {
+            try wearableLog.write(toFile: file, atomically: true, encoding: .utf8)
+        } catch {
+            throw LogError.logGenerationFailed
+        }
+
+        return file
     }
 
     /// Returns the watchOS log contents as a string, using the same flow as support uploads
@@ -68,17 +65,17 @@ extension FileLog: EventLoggingDelegate {
         await WatchManager.shared.requestLogFile()
     }
 
-    public func encryptedWatchLogUUID() -> AnyPublisher<String, Never> {
-        watchLogFileForUpload()
-            .tryMap { [unowned self] filePath in
-                guard let filePath = filePath else {
-                    return Self.noWearableLogsAvailable
-                }
-
-                return try self.queueFileUpload(filePath)
+    public func encryptedWatchLogUUID() async -> String {
+        do {
+            guard let filePath = try await watchLogFileForUpload() else {
+                return Self.noWearableLogsAvailable
             }
-            .replaceError(with: FileLog.genericErrorMessage)
-            .eraseToAnyPublisher()
+
+            return try queueFileUpload(filePath)
+        } catch {
+            addMessage("FileLog: failed to generate the watch log for upload: \(error)")
+            return FileLog.genericErrorMessage
+        }
     }
 
     // MARK: - EventLoggingDelegate
@@ -88,14 +85,18 @@ extension FileLog: EventLoggingDelegate {
     }
 
     public func didFinishUploadingLog(_ log: LogFile) {
+        addMessage("FileLog: uploaded log \(log.uuid)")
         let filePath = log.url.absoluteString
         try? FileManager.default.removeItem(atPath: filePath)
     }
 
     public func uploadFailed(_ log: LogFile) {
+        addMessage("FileLog: failed to upload log \(log.uuid)")
         let filePath = log.url.absoluteString
         try? FileManager.default.removeItem(atPath: filePath)
     }
 
-    public func logError(_ error: Error, userInfo: [String: Any]?) {}
+    public func logError(_ error: Error, userInfo: [String: Any]?) {
+        addMessage("FileLog: log upload error: \(error)")
+    }
 }

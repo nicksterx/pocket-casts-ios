@@ -8,7 +8,7 @@ class AudioPlayTask {
     private var player: AVAudioPlayerNode
     private var bufferManager: PlayBufferManager
 
-    private let cancelled = AtomicBool()
+    private let cancelled = Mutex(false)
 
     private let audioQueue: DispatchQueue
     private let updateQueue: DispatchQueue
@@ -73,7 +73,7 @@ class AudioPlayTask {
             }
 
             if bufferManager.readErrorOccurred.value {
-                PlaybackManager.shared.playbackDidFail(logMessage: "Buffer read error occurred", userMessage: nil)
+                PlaybackManager.shared.playbackDidFail(error: .fileCorrupted(logMessage: "Buffer read error occurred"))
                 shutdown()
 
                 return

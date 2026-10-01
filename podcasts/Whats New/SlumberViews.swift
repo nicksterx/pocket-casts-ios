@@ -1,6 +1,7 @@
 import SwiftUI
 import SafariServices
 import PocketCastsServer
+import EndOfYear
 
 struct SlumberWhatsNewHeader: View {
     @State var distance: CGFloat = 0
@@ -20,7 +21,6 @@ struct SlumberWhatsNewHeader: View {
                 PodcastCover(podcastUuid: "62200ab0-b7ec-0139-f606-0acc26574db2")
                     .offset(y: distance)
                     .animation(.easeInOut(duration: 3).repeatForever(autoreverses: true).delay(1.2), value: distance)
-
             }
                 .frame(width: 120, height: 120)
         }
@@ -94,6 +94,7 @@ class SlumberAnnouncementViewModel: ObservableObject {
         setUpCopies()
     }
 
+    @MainActor
     func showRedeemOrUpgrade() {
         upgradeOrRedeemViewModel.showRedeemOrUpgrade()
     }
@@ -107,10 +108,7 @@ class SlumberUpgradeRedeemViewModel: PlusAccountPromptViewModel {
     let feature: PaidFeature = .slumber
     let upgradeSource: PlusUpgradeViewSource = .slumber
 
-    var upgradeLabel: String {
-        return L10n.plusSubscribeTo
-    }
-
+    @MainActor
     func showRedeemOrUpgrade() {
         isEligible() ? showRedeem() : upgradeTapped()
     }
@@ -119,6 +117,7 @@ class SlumberUpgradeRedeemViewModel: PlusAccountPromptViewModel {
         SubscriptionHelper.subscriptionFrequencyValue() == .yearly || SubscriptionHelper.hasLifetimeGift()
     }
 
+    @MainActor
     private func showRedeem() {
         guard let parentController = SceneHelper.rootViewController(), let url = URL(string: "https://slumberstudios.com/pocketcasts/") else { return }
 
@@ -127,6 +126,7 @@ class SlumberUpgradeRedeemViewModel: PlusAccountPromptViewModel {
         parentController.present(safariController, animated: true)
     }
 
+    @MainActor
     override func showModal(for product: PlusPricingInfoModel.PlusProductPricingInfo? = nil) {
         guard let parentController = SceneHelper.rootViewController() else { return }
 

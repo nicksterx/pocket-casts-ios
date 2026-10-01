@@ -1,18 +1,41 @@
 import Foundation
+import SwiftUI
 
 class AppLifecycleAnalytics {
     // Dependencies
     private let userDefaults: UserDefaults
     private let analytics: Analytics
+    private let now: () -> Date
 
     /// The date the app was last opened, used for calculating time in app
     private var applicationOpenedTime: Date?
 
+#if !os(tvOS)
     private lazy var widgetAnalytics = WidgetAnalytics()
+#endif
 
-    init(userDefaults: UserDefaults = .standard, analytics: Analytics = Analytics.shared) {
+    init(userDefaults: UserDefaults = .standard, analytics: Analytics = Analytics.shared, now: @escaping () -> Date = Date.init) {
         self.userDefaults = userDefaults
         self.analytics = analytics
+        self.now = now
+    }
+}
+
+// MARK: - SwiftUI Scene Phase
+
+extension AppLifecycleAnalytics {
+    /// Drives the open/closed events from SwiftUI `scenePhase` changes, for apps
+    /// that use the SwiftUI app lifecycle instead of an `AppDelegate` (e.g. tvOS).
+    func handle(scenePhase: ScenePhase) {
+        switch scenePhase {
+        case .active:
+            _ = checkApplicationInstalledOrUpgraded()
+            didBecomeActive()
+        case .background:
+            didEnterBackground()
+        default:
+            break
+        }
     }
 }
 
@@ -32,11 +55,13 @@ extension AppLifecycleAnalytics {
             return
         }
 
-        applicationOpenedTime = Date()
+        applicationOpenedTime = now()
 
         analytics.track(.applicationOpened)
 
+#if !os(tvOS)
         widgetAnalytics.track()
+#endif
     }
 
     func didEnterBackground() {
@@ -44,7 +69,7 @@ extension AppLifecycleAnalytics {
 
         // Calculate how long the app was opened for
         if let openTime = applicationOpenedTime {
-            let timeInApp = round(Date().timeIntervalSince(openTime))
+            let timeInApp = round(now().timeIntervalSince(openTime))
             properties = ["time_in_app": timeInApp.description]
         }
 
@@ -77,7 +102,6 @@ extension AppLifecycleAnalytics {
         defer {
             // Set the current version in the user defaults
             userDefaults.set(currentVersion, forKey: Constants.UserDefaults.lastRunVersion)
-            userDefaults.synchronize()
         }
 
         // If there is no previous version, then record this as an install
@@ -121,7 +145,7 @@ extension AppLifecycleAnalytics {
         }
 
         // If we can't determine which version then default to no version
-        guard let version = version else {
+        guard let version else {
             return nil
         }
 

@@ -1,22 +1,23 @@
 import SwiftUI
+import EndOfYear
 
 // Many of these can be replaced with UIContentUnavailableConfigurations in iOS 17
 struct ContentUnavailableConfiguration {
     static func loading() -> UIContentConfiguration {
         return UIHostingConfiguration {
-            LoadingView().environmentObject(Theme.sharedTheme)
+            LoadingView().environmentObject(Theme.shared)
         }
     }
 
     static func noNetwork(tryAgainHandler: @escaping () -> Void) -> UIContentConfiguration {
         return UIHostingConfiguration {
-            NoNetworkView(tryAgainHandler: tryAgainHandler).environmentObject(Theme.sharedTheme)
+            NoNetworkView(tryAgainHandler: tryAgainHandler).environmentObject(Theme.shared)
         }
     }
 
     static func noResults() -> UIContentConfiguration {
         return UIHostingConfiguration {
-            NoResultsView().environmentObject(Theme.sharedTheme)
+            NoResultsView().environmentObject(Theme.shared)
         }
     }
 
@@ -35,7 +36,7 @@ struct ContentUnavailableConfiguration {
     ) -> UIContentConfiguration {
         return UIHostingConfiguration {
             EmptyStateView(title: title, message: message, icon: icon, actions: actions, style: style)
-                .environmentObject(Theme.sharedTheme)
+                .environmentObject(Theme.shared)
         }
     }
 }
@@ -49,6 +50,7 @@ struct LoadingView: View {
                 .padding()
                 .tint(theme.primaryIcon01)
         }
+        .frame(maxWidth: .infinity)
     }
 }
 

@@ -18,7 +18,7 @@ class FoldersCoordinator: NSObject {
 
     private var currentSource: AnalyticsSource = .unknown
 
-    private let startingTime: Date = Date.now
+    private let startingTime = Date.now
 
     private let navigationManager: NavigationManager
     private let dataManager: DataManager
@@ -31,7 +31,7 @@ class FoldersCoordinator: NSObject {
         static let intervalAfterStartup: TimeInterval = 10.seconds
     }
 
-    init(navigationManager: NavigationManager = .sharedManager, dataManager: DataManager = .sharedManager) {
+    init(navigationManager: NavigationManager = .shared, dataManager: DataManager = .shared) {
         self.navigationManager = navigationManager
         self.dataManager = dataManager
         self.suggestedFoldersModel = SuggestedFoldersModel()
@@ -85,8 +85,8 @@ class FoldersCoordinator: NSObject {
         }
 
         let creatFolderView = CreateFolderView { [weak vc, weak self] folderUuid in
-            guard let self = self else { return }
-            if let folderUuid = folderUuid, let folder = dataManager.findFolder(uuid: folderUuid) {
+            guard let self else { return }
+            if let folderUuid, let folder = dataManager.findFolder(uuid: folderUuid) {
                 vc?.dismiss(animated: true, completion: { [weak self] in
                     self?.navigationManager.navigateTo(NavigationManager.folderPageKey, data: [NavigationManager.folderKey: folder])
                 })
@@ -94,7 +94,7 @@ class FoldersCoordinator: NSObject {
                 vc?.dismiss(animated: true, completion: nil)
             }
         }
-        let hostingController = PCHostingController(rootView: creatFolderView.environmentObject(Theme.sharedTheme))
+        let hostingController = PCHostingController(rootView: creatFolderView.environmentObject(Theme.shared))
 
         vc.present(hostingController, animated: true, completion: nil)
     }
@@ -124,7 +124,7 @@ class FoldersCoordinator: NSObject {
                 })
             }
         }
-        let hostingController = UIHostingController(rootView: suggestedFoldersView.environmentObject(Theme.sharedTheme))
+        let hostingController = UIHostingController(rootView: suggestedFoldersView.environmentObject(Theme.shared))
         vc.present(hostingController, animated: true, completion: nil)
         hostingController.sheetPresentationController?.delegate = self
     }
@@ -147,15 +147,14 @@ class FoldersCoordinator: NSObject {
                 return
             }
         }
-        let hostingController = UIHostingController(rootView: suggestedFoldersView.environmentObject(Theme.sharedTheme))
+        let hostingController = UIHostingController(rootView: suggestedFoldersView.environmentObject(Theme.shared))
         vc.present(hostingController, animated: true, completion: nil)
         hostingController.sheetPresentationController?.delegate = self
-
     }
 
     private func applySuggestedFolders(_ suggestedFolders: [SuggestedFolder]) {
         saveLastUuidsUsed()
-        DataManager.sharedManager.deleteAllFoldersAndMarkSync()
+        DataManager.shared.deleteAllFoldersAndMarkSync()
         for suggestedFolder in suggestedFolders {
             let folder = makeFolder(from: suggestedFolder)
             dataManager.bulkSetFolderUuid(folderUuid: folder.uuid, podcastUuids: suggestedFolder.podcastUuids)
@@ -165,7 +164,7 @@ class FoldersCoordinator: NSObject {
 
     private var currentPodcastsHash: String {
         let uuids = dataManager.allPodcastsOrderedByAddedDate().map { $0.uuid }.sorted()
-        let md5 = String(uuids.joined(separator: "")).md5
+        let md5 = uuids.joined().md5
         return md5
     }
 
@@ -186,7 +185,7 @@ class FoldersCoordinator: NSObject {
         folder.sortOrder = ServerPodcastManager.shared.lowestSortOrderForHomeGrid() - 1
 
         // the sort type for newly created folders defaults to the same thing the home grid is set to
-        folder.sortType = Int32(Settings.homeFolderSortOrder().old.rawValue)
+        folder.sortType = Int32(Settings.homeFolderSortOrder.old.rawValue)
         dataManager.save(folder: folder)
         return folder
     }
@@ -209,7 +208,7 @@ class FoldersCoordinator: NSObject {
             NotificationCenter.default.publisher(for: ServerNotifications.iapPurchaseCompleted)
         )
         .receive(on: OperationQueue.main)
-        .sink { [unowned self] notification in
+        .sink { [unowned self] _ in
             refreshAfterUpsellFlow()
         }
         .store(in: &cancellables)
@@ -217,7 +216,7 @@ class FoldersCoordinator: NSObject {
         //Observe Login/Signup notification
         NotificationCenter.default.publisher(for: .onboardingFlowDidDismiss)
         .receive(on: OperationQueue.main)
-        .sink { [unowned self] notification in
+        .sink { [unowned self] _ in
             refreshAfterUpsellFlow()
         }
         .store(in: &cancellables)

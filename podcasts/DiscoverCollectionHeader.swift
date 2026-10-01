@@ -18,6 +18,17 @@ class DiscoverCollectionHeader: UICollectionReusableView {
         }
     }
 
+    @IBOutlet var collageTopConstraint: NSLayoutConstraint!
+
+    /// How far the collage runs above the header, so that it fills the space behind the
+    /// navigation bar. Its bottom is pinned to the header, so the avatar and everything
+    /// below it stay put however far it bleeds.
+    var collageTopBleed: CGFloat = 0 {
+        didSet {
+            collageTopConstraint.constant = -collageTopBleed
+        }
+    }
+
     @IBOutlet var avatarImageView: UIImageView! {
         didSet {
             avatarImageView.layer.cornerRadius = 40
@@ -27,21 +38,18 @@ class DiscoverCollectionHeader: UICollectionReusableView {
     @IBOutlet var avatarBorderView: ThemeableView! {
         didSet {
             avatarBorderView.layer.cornerRadius = 44
+            avatarBorderView.layer.borderWidth = 1
+            setAvatarBorderColor()
         }
     }
 
-    @IBOutlet var avatarShadowView: UIView! {
+    @IBOutlet var subtitleLabel: UILabel! {
         didSet {
-            avatarShadowView.layer.cornerRadius = 40
-            avatarShadowView.layer.shadowColor = UIColor.black.cgColor
-            avatarShadowView.layer.shadowOffset = CGSize(width: 0, height: 2)
-            avatarShadowView.layer.shadowOpacity = 0.15
-            avatarShadowView.layer.shadowRadius = 4
-            avatarShadowView.layer.shadowPath = UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: 80, height: 80)).cgPath
+            subtitleLabel.font = .font(ofSize: 13, weight: .bold, scalingWith: .footnote)
+            subtitleLabel.adjustsFontForContentSizeCategory = true
         }
     }
 
-    @IBOutlet var subtitleLabel: UILabel!
     @IBOutlet var headerView: ThemeableView! {
         didSet {
             headerView.style = .primaryUi02
@@ -90,7 +98,7 @@ class DiscoverCollectionHeader: UICollectionReusableView {
             descriptionLabel.style = .primaryText02
             descriptionLabel.font = .font(ofSize: 13, weight: .regular, scalingWith: .footnote)
             descriptionLabel.adjustsFontForContentSizeCategory = true
-
+            descriptionLabel.textAlignment = .center
         }
     }
 
@@ -108,7 +116,7 @@ class DiscoverCollectionHeader: UICollectionReusableView {
     }
 
     func populate(podcastCollection: PodcastCollection?) {
-        guard let podcastCollection = podcastCollection else {
+        guard let podcastCollection else {
             headerView.isHidden = true
             return
         }
@@ -125,7 +133,7 @@ class DiscoverCollectionHeader: UICollectionReusableView {
         }
         if let avatarUrl = podcastCollection.collectionImage {
             avatarBorderView.isHidden = false
-            ImageManager.sharedManager.loadDiscoverImage(imageUrl: avatarUrl, imageView: avatarImageView, placeholderSize: .grid)
+            ImageManager.shared.loadDiscoverImage(imageUrl: avatarUrl, imageView: avatarImageView, placeholderSize: .grid)
         } else {
             avatarBorderView.isHidden = true
         }
@@ -140,19 +148,18 @@ class DiscoverCollectionHeader: UICollectionReusableView {
         setSubtitleColor()
     }
 
+    private func setAvatarBorderColor() {
+        avatarBorderView.layer.borderColor = AppTheme.colorForStyle(.primaryUi05).cgColor
+    }
+
     private func setSubtitleColor() {
-        if let colors = podcastCollection?.colors, let darkColor = colors.onDarkBackground, let lightColor = colors.onLightBackground {
-            let subtitleColor = Theme.isDarkTheme() ? darkColor : lightColor
-            subtitleLabel.textColor = UIColor(hex: subtitleColor)
-        } else {
-            subtitleLabel.textColor = AppTheme.colorForStyle(.support05)
-        }
+        subtitleLabel.textColor = podcastCollection?.colors?.activeThemeColor ?? AppTheme.colorForStyle(.support05)
     }
 
     private func setupCollageImage() {
         guard let mobileCollage = podcastCollection?.collageImages?.filter({ $0.key == "mobile" }), let collageUrl = mobileCollage.first?.image_url else { return }
 
-        ImageManager.sharedManager.retrieveDiscoverImage(imageUrl: collageUrl, completionHandler: { image in
+        ImageManager.shared.retrieveDiscoverImage(imageUrl: collageUrl, completionHandler: { image in
             guard let currentCGImage = image?.cgImage else {
                 return
             }
@@ -178,12 +185,7 @@ class DiscoverCollectionHeader: UICollectionReusableView {
     }
 
     private func setImageTint() {
-        if let darkTintColor = podcastCollection?.colors?.onDarkBackground, let lightTintColor = podcastCollection?.colors?.onLightBackground {
-            let backgroundColor = Theme.isDarkTheme() ? darkTintColor : lightTintColor
-            collageTintView.backgroundColor = UIColor(hex: backgroundColor)
-        } else {
-            collageTintView.backgroundColor = AppTheme.colorForStyle(.support09)
-        }
+        collageTintView.backgroundColor = podcastCollection?.colors?.activeThemeColor ?? AppTheme.colorForStyle(.support09)
     }
 
     @objc private func linkTapped() {
@@ -193,5 +195,6 @@ class DiscoverCollectionHeader: UICollectionReusableView {
     @objc func themeDidChange() {
         setImageTint()
         setSubtitleColor()
+        setAvatarBorderColor()
     }
 }

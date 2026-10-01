@@ -1,8 +1,9 @@
 import Foundation
 import PocketCastsDataModel
 import PocketCastsServer
+import PocketCastsUtils
 
-class OpmlImporter: Operation, XMLParserDelegate {
+class OpmlImporter: Operation, XMLParserDelegate, @unchecked Sendable {
     private var podcastsToAdd = [String]()
     private var pollUuids = [String]()
     private var failedCount = 0
@@ -35,7 +36,7 @@ class OpmlImporter: Operation, XMLParserDelegate {
             // parse OPML file
             let parser = XMLParser(contentsOf: opmlFileUrl)
             parser?.delegate = self
-            guard let parsed = parser?.parse(), parsed, parsedUrls.count > 0 else {
+            guard let parsed = parser?.parse(), parsed, !parsedUrls.isEmpty else {
                 DispatchQueue.main.sync {
                     if let progressWindow = self.progressWindow {
                         progressWindow.hideAlert(false)
@@ -57,7 +58,7 @@ class OpmlImporter: Operation, XMLParserDelegate {
             importPodcasts(urls: parsedUrls)
 
             var amountOfTimesPolled = 0
-            while amountOfTimesPolled < 20, pollUuids.count > 0 {
+            while amountOfTimesPolled < 20, !pollUuids.isEmpty {
                 amountOfTimesPolled += 1
 
                 let pollUuidsToSend = pollUuids
@@ -68,7 +69,7 @@ class OpmlImporter: Operation, XMLParserDelegate {
 
             DispatchQueue.main.async {
                 if let progressWindow = self.progressWindow {
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.podcastListPageKey, data: nil)
+                    NavigationManager.shared.navigateTo(NavigationManager.podcastListPageKey, data: nil)
                     progressWindow.hideAlert(true)
                 }
 
@@ -139,12 +140,12 @@ class OpmlImporter: Operation, XMLParserDelegate {
         for uuid in podcastsToAdd {
             importQueue.addOperation {
                 // check to see if we already have this podcast
-                let existingPodcast = DataManager.sharedManager.findPodcast(uuid: uuid, includeUnsubscribed: true)
+                let existingPodcast = DataManager.shared.findPodcast(uuid: uuid, includeUnsubscribed: true)
                 if let podcast = existingPodcast {
                     if !podcast.isSubscribed() {
                         podcast.subscribed = 1
                         podcast.syncStatus = SyncStatus.notSynced.rawValue
-                        DataManager.sharedManager.save(podcast: podcast)
+                        DataManager.shared.save(podcast: podcast)
                     }
                     self.importedCount += 1
                     DispatchQueue.main.async {

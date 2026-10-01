@@ -2,8 +2,8 @@ import Foundation
 import PocketCastsDataModel
 import PocketCastsUtils
 
-class ArchiveHelper {
-    class func archiveTimeToText(_ time: TimeInterval) -> String {
+enum ArchiveHelper {
+    static func archiveTimeToText(_ time: TimeInterval) -> String {
         if time < 0 {
             return L10n.timeFormatNever.localizedCapitalized
         } else if time == 0 {
@@ -25,12 +25,12 @@ class ArchiveHelper {
         }
     }
 
-    class func applyAutoArchivingToPodcast(_ podcast: Podcast?) {
-        guard let podcast = podcast else { return }
+    static func applyAutoArchivingToPodcast(_ podcast: Podcast?) {
+        guard let podcast else { return }
 
-        let afterPlayedTime = podcast.isAutoArchiveOverridden ? podcast.autoArchivePlayedAfterTime : Settings.autoArchivePlayedAfter()
-        let afterInactiveTime = podcast.isAutoArchiveOverridden ? podcast.autoArchiveInactiveAfterTime : Settings.autoArchiveInactiveAfter()
-        let episodeLimit = podcast.isAutoArchiveOverridden ? podcast.autoArchiveEpisodeLimitCount : 0
+        let afterPlayedTime = podcast.overrideGlobalArchive ? podcast.autoArchivePlayedAfter : Settings.autoArchivePlayedAfter()
+        let afterInactiveTime = podcast.overrideGlobalArchive ? podcast.autoArchiveInactiveAfter : Settings.autoArchiveInactiveAfter()
+        let episodeLimit = podcast.overrideGlobalArchive ? podcast.autoArchiveEpisodeLimit : 0
         let archiveStarred = Settings.archiveStarredEpisodes()
 
         if afterPlayedTime > 0 {
@@ -53,8 +53,8 @@ class ArchiveHelper {
         }
 
         if episodeLimit > 0 {
-            let currentlyPlayingUuid = PlaybackManager.shared.playing() ? PlaybackManager.shared.currentEpisode()?.uuid : nil
-            let episodes = DataManager.sharedManager.findEpisodesWhere(customWhere: "podcast_id = ? ORDER BY publishedDate DESC, addedDate DESC", arguments: [podcast.id])
+            let currentlyPlayingUuid = PlaybackManager.shared.isPlaying ? PlaybackManager.shared.currentEpisode?.uuid : nil
+            let episodes = DataManager.shared.findEpisodesWhere(customWhere: "podcast_id = ? ORDER BY publishedDate DESC, addedDate DESC", arguments: [podcast.id])
             for (index, episode) in episodes.enumerated() {
                 if index < episodeLimit { continue }
 
@@ -66,8 +66,8 @@ class ArchiveHelper {
         }
     }
 
-    private class func removeEpisodesMatchingQuery(_ query: String, arguments: [Any]) {
-        let removableEpisodes = DataManager.sharedManager.findEpisodesWhere(customWhere: query, arguments: arguments)
+    private static func removeEpisodesMatchingQuery(_ query: String, arguments: [Any]) {
+        let removableEpisodes = DataManager.shared.findEpisodesWhere(customWhere: query, arguments: arguments)
         for episode in removableEpisodes {
             EpisodeManager.archiveEpisode(episode: episode, fireNotification: false, userInitiated: false)
         }

@@ -1,41 +1,58 @@
 import Foundation
+import UIKit
 
-class HapticsHelper {
-    class func triggerSkipBackHaptic() {
+enum HapticsHelper {
+    static func triggerSkipBackHaptic() {
         triggerImpactOccurredHaptic(style: .medium)
     }
 
-    class func triggerSkipForwardHaptic() {
+    static func triggerSkipForwardHaptic() {
         triggerImpactOccurredHaptic(style: .medium)
     }
 
-    class func triggerSubscribedHaptic() {
+    static func triggerSubscribedHaptic() {
         triggerSuccessHaptic()
     }
 
-    class func triggerStarHaptic() {
+    static func triggerStarHaptic() {
         triggerImpactOccurredHaptic(style: .light)
     }
 
-    class func triggerPlayPauseHaptic() {
+    static func triggerPlayPauseHaptic() {
         triggerImpactOccurredHaptic(style: .light)
     }
 
-    class func triggerRearrangeHaptic() {
-        triggerImpactOccurredHaptic(style: .light)
+    #if os(tvOS)
+    enum FeedbackStyle {
+        case heavy
+        case light
+        case medium
+    }
+    private static func triggerImpactOccurredHaptic(style: HapticsHelper.FeedbackStyle) {
+        //No op
     }
 
-    class func triggerPullToRefreshHaptic() {
-        triggerImpactOccurredHaptic(style: .heavy)
+    private static func triggerSuccessHaptic() {
+        //No op
     }
 
-    private class func triggerImpactOccurredHaptic(style: UIImpactFeedbackGenerator.FeedbackStyle) {
+    static func triggerErrorHaptic() {
+        //No op
+    }
+    #else
+    private static func triggerImpactOccurredHaptic(style: UIImpactFeedbackGenerator.FeedbackStyle) {
         let feedbackGenerator = UIImpactFeedbackGenerator(style: style)
         feedbackGenerator.impactOccurred()
     }
 
-    private class func triggerSuccessHaptic() {
+    private static func triggerSuccessHaptic() {
         let feedbackGenerator = UINotificationFeedbackGenerator()
         feedbackGenerator.notificationOccurred(.success)
     }
+
+    static func triggerErrorHaptic() {
+        let feedbackGenerator = UINotificationFeedbackGenerator()
+        feedbackGenerator.notificationOccurred(.error)
+    }
+    #endif
 }

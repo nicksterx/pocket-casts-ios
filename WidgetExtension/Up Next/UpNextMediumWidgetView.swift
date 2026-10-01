@@ -79,8 +79,6 @@ struct MediumFilterView: View {
     @Environment(\.showsWidgetContainerBackground) var showsWidgetBackground
     @Environment(\.isAccentedRenderingMode) var isAccentedRenderingMode
 
-    private let logoHeight: CGFloat = 28
-
     var body: some View {
         ZStack {
             if showsWidgetBackground, !isAccentedRenderingMode {
@@ -105,7 +103,7 @@ struct MediumFilterView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     EpisodeView.createCompactWhenNecessaryView(episode: firstEpisode)
                         .frame(minHeight: 42, maxHeight: 56)
-                    if let secondEpisode = secondEpisode {
+                    if let secondEpisode {
                         EpisodeView.createCompactWhenNecessaryView(episode: secondEpisode)
                             .frame(minHeight: 42, maxHeight: 56)
                     } else {

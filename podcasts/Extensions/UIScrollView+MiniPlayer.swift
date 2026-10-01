@@ -1,7 +1,10 @@
 import Foundation
+import UIKit
 
 extension UIScrollView {
     func applyInsetForMiniPlayer(additionalBottomInset: CGFloat = 0) {
+        guard !LiquidGlass.isEnabled else {return }
+
         let existingInset = contentInset
         contentInset = UIEdgeInsets(top: existingInset.top, left: existingInset.left, bottom: existingInset.bottom + Constants.Values.miniPlayerOffset + additionalBottomInset, right: existingInset.right)
 
@@ -10,9 +13,16 @@ extension UIScrollView {
     }
 
     func updateContentInset(multiSelectEnabled: Bool, ignoreMiniPlayer: Bool = false) {
+        if LiquidGlass.isEnabled {
+            let multiSelectFooterOffset: CGFloat = multiSelectEnabled ? 60 : 0
+            contentInset.bottom = multiSelectFooterOffset
+            verticalScrollIndicatorInsets.bottom = multiSelectFooterOffset
+            return
+        }
+
         let existingInset = contentInset
         let multiSelectFooterOffset: CGFloat = multiSelectEnabled ? 80 : 0
-        let miniPlayerOffset: CGFloat = (ignoreMiniPlayer || PlaybackManager.shared.currentEpisode() == nil) ? 0 : Constants.Values.miniPlayerOffset
+        let miniPlayerOffset: CGFloat = ignoreMiniPlayer ? 0 : Constants.effectiveMiniPlayerOffset
         contentInset = UIEdgeInsets(top: existingInset.top, left: existingInset.left, bottom: miniPlayerOffset + multiSelectFooterOffset, right: existingInset.right)
 
         let existingScrollIndicatorInset = verticalScrollIndicatorInsets

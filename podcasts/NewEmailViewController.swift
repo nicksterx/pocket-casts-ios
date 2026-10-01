@@ -25,11 +25,7 @@ class NewEmailViewController: PCViewController, UITextFieldDelegate {
         didSet {
             nextButton.isEnabled = false
             nextButton.buttonStyle = .primaryInteractive01Disabled
-            if FeatureFlag.newOnboardingAccountCreation.enabled {
-                nextButton.setTitle(L10n.createAccount, for: .normal)
-            } else {
-                nextButton.setTitle(L10n.next, for: .normal)
-            }
+            nextButton.setTitle(L10n.createAccount, for: .normal)
             nextButton.titleLabel?.adjustsFontForContentSizeCategory = true
             nextButton.titleLabel?.numberOfLines = 0
 
@@ -102,18 +98,11 @@ class NewEmailViewController: PCViewController, UITextFieldDelegate {
         }
     }
 
-    weak var accountUpdatedDelegate: AccountUpdatedDelegate?
-
     override func viewDidLoad() {
         super.viewDidLoad()
         title = L10n.createAccount
         activityIndicator.isHidden = true
-        let backImage: UIImage?
-        if FeatureFlag.newOnboardingAccountCreation.enabled {
-            backImage = UIImage(systemName: "chevron.backward", withConfiguration: UIImage.SymbolConfiguration(textStyle: UIFont.TextStyle(rawValue: "UICTFontTextStyleEmphasizedBody"), scale: .default))
-        } else {
-            backImage = UIImage(named: "nav-back")
-        }
+        let backImage = UIImage(systemName: "chevron.backward", withConfiguration: UIImage.SymbolConfiguration(textStyle: UIFont.TextStyle(rawValue: "UICTFontTextStyleEmphasizedBody"), scale: .default))
         navigationItem.leftBarButtonItem = UIBarButtonItem(image: backImage, style: .done, target: self, action: #selector(backTapped))
         navigationController?.navigationBar.setValue(true, forKey: "hidesShadow")
 
@@ -174,7 +163,7 @@ class NewEmailViewController: PCViewController, UITextFieldDelegate {
     }
 
     private func startRegister(_ username: String, password: String) {
-        Analytics.track(.createAccountNextButtonTapped)
+        OnboardingFlow.shared.track(.createAccountNextButtonTapped)
 
         passwordBorderView.layer.borderColor = ThemeColor.primaryUi05().cgColor
         contentView.alpha = 0.3
@@ -242,7 +231,7 @@ class NewEmailViewController: PCViewController, UITextFieldDelegate {
         ServerSettings.saveSyncingPassword(password)
 
         // we've signed in, set all our existing podcasts to be non synced
-        DataManager.sharedManager.markAllPodcastsUnsynced()
+        DataManager.shared.markAllPodcastsUnsynced()
 
         ServerSettings.clearLastSyncTime()
         ServerSettings.setSyncingEmail(email: username)

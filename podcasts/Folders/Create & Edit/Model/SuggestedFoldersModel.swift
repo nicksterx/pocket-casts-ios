@@ -31,7 +31,7 @@ class SuggestedFoldersModel: ObservableObject {
 
     var previousUuids: [String] = []
 
-    init(dataManager: DataManager = DataManager.sharedManager, failedToLoadAction: (() -> ())? = nil) {
+    init(dataManager: DataManager = DataManager.shared, failedToLoadAction: (() -> ())? = nil) {
         self.dataManager = dataManager
         self.failedToLoadAction = failedToLoadAction
     }
@@ -82,7 +82,7 @@ class SuggestedFoldersModel: ObservableObject {
     }
 
     var userHasExistingFolders: Bool {
-        return dataManager.allFolders().count > 0
+        return !dataManager.allFolders().isEmpty
     }
 
     var userIsSignedIn: Bool {
@@ -127,7 +127,7 @@ class SuggestedFoldersModel: ObservableObject {
               let folders = try? JSONDecoder().decode([SuggestedFolder].self, from: data) else {
             return
         }
-        var previousUuids = folders.reduce(into: [String]()) { result, folder in
+        let previousUuids = folders.reduce(into: [String]()) { result, folder in
             result.append(contentsOf: folder.podcastUuids)
         }
         self.folders = folders

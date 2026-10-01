@@ -16,7 +16,7 @@ struct EpisodeDateHelper {
 
     #if !os(watchOS)
         static func setDate(episode: BaseEpisode, on label: UILabel, tintColor: UIColor?) {
-            let episodeDate = DateFormatHelper.sharedHelper.tinyLocalizedFormat(episode.publishedDate).localizedUppercase
+            let episodeDate = DateFormatHelper.shared.tinyLocalizedFormat(episode.publishedDate).localizedUppercase
 
             guard let episode = episode as? Episode else {
                 label.text = episodeDate
@@ -35,7 +35,7 @@ struct EpisodeDateHelper {
         }
 
         static func formattedDate(for episode: BaseEpisode) -> String {
-            let episodeDate = DateFormatHelper.sharedHelper.tinyLocalizedFormat(episode.publishedDate).localizedUppercase
+            let episodeDate = DateFormatHelper.shared.tinyLocalizedFormat(episode.publishedDate).localizedUppercase
 
             guard let episode = episode as? Episode else {
                 return episodeDate
@@ -51,7 +51,7 @@ struct EpisodeDateHelper {
         }
 
         private static func rowTitle(dateText: String, episode: Episode, indicatorText: String? = nil) -> String {
-            guard let indicatorText = indicatorText else {
+            guard let indicatorText else {
                 if episode.episodeNumber < 1 {
                     return dateText
                 }
@@ -62,7 +62,7 @@ struct EpisodeDateHelper {
         }
 
         private static func setRowTitle(dateText: String, episode: Episode, label: UILabel, tintColor: UIColor?, indicatorText: String? = nil) {
-            guard let indicatorText = indicatorText, let tintColor = tintColor else {
+            guard let indicatorText, let tintColor else {
                 if episode.episodeNumber < 1 {
                     label.text = dateText
 
@@ -88,7 +88,7 @@ struct EpisodeDateHelper {
         }
 
         static func displayDate(forEpisode episode: BaseEpisode) -> String {
-            let episodeDate = DateFormatHelper.sharedHelper.tinyLocalizedFormat(episode.publishedDate)
+            let episodeDate = DateFormatHelper.shared.tinyLocalizedFormat(episode.publishedDate)
 
             guard let episode = episode as? Episode else {
                 return episodeDate
@@ -105,7 +105,7 @@ struct EpisodeDateHelper {
         }
 
         private static func rowTitle(dateText: String, episode: Episode, indicatorText: String? = nil) -> String {
-            guard let indicatorText = indicatorText else {
+            guard let indicatorText else {
                 if episode.episodeNumber < 1 {
                     return dateText
                 }

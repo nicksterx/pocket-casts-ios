@@ -94,11 +94,11 @@ class PodcastChooserViewController: PCViewController, UITableViewDelegate, UITab
 
         let podcastUuid = allPodcasts[indexPath.row].uuid
         let index = selectedUuids.firstIndex(of: podcastUuid)
-        if let index = index {
+        if let index {
             selectedUuids.remove(at: index)
             Analytics.track(.settingsSelectPodcastsPodcastToggled, properties: ["uuid": podcastUuid, "enabled": false, "source": analyticsSource])
             // to support things like playlist editting that need to know about all/none selected events send a different event when it gets to 0
-            if selectedUuids.count == 0, allowSelectAll {
+            if selectedUuids.isEmpty, allowSelectAll {
                 delegate?.bulkSelectionChange(selected: false)
             } else {
                 delegate?.podcastUnselected(podcast: podcastUuid)
@@ -121,7 +121,7 @@ class PodcastChooserViewController: PCViewController, UITableViewDelegate, UITab
     }
 
     private func loadPodcasts() {
-        allPodcasts = DataManager.sharedManager.allPodcastsOrderedByTitle()
+        allPodcasts = DataManager.shared.allPodcastsOrderedByTitle()
 
         if selectAllOnLoad {
             selectedUuids = allPodcasts.map(\.uuid)

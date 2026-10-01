@@ -48,8 +48,8 @@ class DiscoverPodcastTableCell: ThemeableCell {
             subscribeButton.offImage = UIImage(named: "discover_add")
             subscribeButton.tintColor = ThemeColor.secondaryIcon01()
 
-            subscribeButton.offAccessibilityLabel = FeatureFlag.useFollowNaming.enabled ? L10n.follow : L10n.subscribe
-            subscribeButton.onAccessibilityLabel = FeatureFlag.useFollowNaming.enabled ? L10n.unfollow : L10n.subscribed
+            subscribeButton.offAccessibilityLabel = L10n.follow
+            subscribeButton.onAccessibilityLabel = L10n.unfollow
 
             NotificationCenter.default.addObserver(self, selector: #selector(podcastWasAdded), name: Constants.Notifications.podcastAdded, object: nil)
         }
@@ -73,23 +73,33 @@ class DiscoverPodcastTableCell: ThemeableCell {
     func populateFrom(_ discoverPodcast: DiscoverPodcast, number: Int) {
         self.discoverPodcast = discoverPodcast
 
-        podcastTitle.text = discoverPodcast.title?.localized
+        let title = discoverPodcast.title?.localized ?? ""
+        let isExplicit = discoverPodcast.isExplicit ?? false
+        if isExplicit {
+            podcastTitle.attributedText = ExplicitBadgeHelper.attributedTitle(title, font: podcastTitle.font)
+        } else {
+            podcastTitle.text = title
+        }
+
         podcastAuthor.text = discoverPodcast.author
         itemNumber.text = (number > 0) ? String(number) : nil
         itemNumber.textColor = ThemeColor.primaryIcon01()
         if itemNumber.text == nil {
             numberWidth.constant = 0
             podcastImageLeadingConstraint.constant = 16
+        } else {
+            // Start the separator where the artwork does, so it doesn't run under the ranking number.
+            separatorInset = UIEdgeInsets(top: 0, left: podcastImageLeadingConstraint.constant, bottom: 0, right: 0)
         }
 
         subscribeButton.currentlyOn = false
         if let uuid = discoverPodcast.uuid {
-            if let _ = DataManager.sharedManager.findPodcast(uuid: uuid) {
+            if let _ = DataManager.shared.findPodcast(uuid: uuid) {
                 subscribeButton.currentlyOn = true
             }
 
             let imageUrl = DiscoverServerHandler.thumbnailUrlString(forPodcast: uuid, size: 140)
-            ImageManager.sharedManager.loadSearchImage(imageUrl: imageUrl, imageView: podcastImage, placeholderSize: .list)
+            ImageManager.shared.loadSearchImage(imageUrl: imageUrl, imageView: podcastImage, placeholderSize: .list)
         }
 
         subscribeButton.shouldAnimate = true
@@ -97,7 +107,7 @@ class DiscoverPodcastTableCell: ThemeableCell {
 
     @objc private func podcastWasAdded() {
         if let headerUuid = discoverPodcast?.uuid {
-            if let _ = DataManager.sharedManager.findPodcast(uuid: headerUuid) {
+            if let _ = DataManager.shared.findPodcast(uuid: headerUuid) {
                 if !subscribeButton.currentlyOn { subscribeButton.currentlyOn = true }
             } else {
                 if subscribeButton.currentlyOn { subscribeButton.currentlyOn = false }
@@ -108,7 +118,7 @@ class DiscoverPodcastTableCell: ThemeableCell {
     @IBAction func subscribeTapped(_ sender: AnyObject) {
         subscribeButton.currentlyOn = true
 
-        guard let discoverPodcast = discoverPodcast else { return }
+        guard let discoverPodcast else { return }
 
         if discoverPodcast.iTunesOnly() {
             ServerPodcastManager.shared.subscribeFromItunesId(Int(discoverPodcast.iTunesId!)!, completion: nil)
@@ -122,12 +132,19 @@ class DiscoverPodcastTableCell: ThemeableCell {
 
     override func handleThemeDidChange() {
         subscribeButton.tintColor = ThemeColor.primaryIcon02()
+        updateExplicitBadge()
+    }
+
+    private func updateExplicitBadge() {
+        guard let discoverPodcast, podcastTitle.attributedText != nil else { return }
+        let title = discoverPodcast.title?.localized ?? ""
+        podcastTitle.attributedText = ExplicitBadgeHelper.attributedTitle(title, font: podcastTitle.font)
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
 
-        ImageManager.sharedManager.cancelLoad(podcastImage)
+        ImageManager.shared.cancelLoad(podcastImage)
 
         subscribeButton.shouldAnimate = false
         discoverPodcast = nil
@@ -136,6 +153,10 @@ class DiscoverPodcastTableCell: ThemeableCell {
     override func awakeFromNib() {
         super.awakeFromNib()
         updateSize()
+
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: DiscoverPodcastTableCell, _) in
+            view.updateSize()
+        }
     }
 
     // MARK: - Dynamic Type support
@@ -154,13 +175,4 @@ class DiscoverPodcastTableCell: ThemeableCell {
         podcastTitle.updateNumberOfLines(regular: 1, accessibility: 3)
         podcastAuthor.updateNumberOfLines(regular: 1, accessibility: 3)
     }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-
-        if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
-            updateSize()
-        }
-    }
-
 }

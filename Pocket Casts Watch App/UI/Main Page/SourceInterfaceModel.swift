@@ -58,7 +58,7 @@ class SourceInterfaceModel: ObservableObject {
     }
 
     func removeAllCustomObservers() {
-        if customObservers.count == 0 { return }
+        if customObservers.isEmpty { return }
 
         let notCenter = NotificationCenter.default
         for name in customObservers {
@@ -68,7 +68,7 @@ class SourceInterfaceModel: ObservableObject {
     }
 
     private func containsObserver(_ name: Notification.Name) -> Bool {
-        if customObservers.count == 0 { return false }
+        if customObservers.isEmpty { return false }
 
         return customObservers.contains(name)
     }
@@ -84,7 +84,7 @@ class SourceInterfaceModel: ObservableObject {
 
     @objc private func handleStatusChangeFromNotification() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             self.reload()
         }
@@ -124,11 +124,10 @@ class SourceInterfaceModel: ObservableObject {
             RefreshManager.shared.refreshPodcasts(forceEvenIfRefreshedRecently: false)
         }
         SourceManager.shared.setSource(newSource: .watch)
-
     }
 
     private func nowPlayingEpisodesMatchOnBothSources() -> Bool {
-        let watchCurrentEpisode = PlaybackManager.shared.currentEpisode()
+        let watchCurrentEpisode = PlaybackManager.shared.currentEpisode
         let phoneCurrentEpisode = WatchDataManager.playingEpisode()
         if watchCurrentEpisode?.uuid == phoneCurrentEpisode?.uuid {
             if watchCurrentEpisode?.playedUpTo == phoneCurrentEpisode?.playedUpTo {

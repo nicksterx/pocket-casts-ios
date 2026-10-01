@@ -47,7 +47,7 @@ class SupporterGratitudeViewController: PCViewController, SyncSigninDelegate {
             heartView.setDefaultGreen()
             updatePodcastHeartColors(uuid: uuid)
         }
-        if let bundleUuid = bundleUuid {
+        if let bundleUuid {
             loadBundleCollection(uuid: bundleUuid)
             heartView.setDefaultGreen()
         }
@@ -69,16 +69,16 @@ class SupporterGratitudeViewController: PCViewController, SyncSigninDelegate {
     func signingProcessCompleted() {
         dismiss(animated: true, completion: {
             var uuid: String? = self.bundleUuid
-            if self.bundleUuid == nil, let podcastUuid = self.podcastInfo?.uuid, let containerBundle = SubscriptionHelper.bundleSubscriptionForPodcast(podcastUuid: podcastUuid) {
+            if self.bundleUuid == nil, let podcastUuid = self.podcastInfo?.uuid, let containerBundle = SubscriptionHelper.bundleSubscription(forPodcastUuid: podcastUuid) {
                 uuid = containerBundle.bundleUuid
             }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.supporterBundlePageKey, data: [NavigationManager.supporterBundleUuid: uuid as Any])
+            NavigationManager.shared.navigateTo(NavigationManager.supporterBundlePageKey, data: [NavigationManager.supporterBundleUuid: uuid as Any])
         })
     }
 
     private func updatePodcastHeartColors(uuid: String) {
         CacheServerHandler.shared.loadPodcastColors(podcastUuid: uuid, allowCachedVersion: false, completion: { _, lightThemeTint, darkThemeTint in
-            guard let lightThemeTint = lightThemeTint, let darkThemeTint = darkThemeTint else { return }
+            guard let lightThemeTint, let darkThemeTint else { return }
             DispatchQueue.main.sync { () in
                 self.heartView.setGradientColors(light: UIColor(hex: lightThemeTint), dark: UIColor(hex: darkThemeTint))
             }
@@ -88,7 +88,7 @@ class SupporterGratitudeViewController: PCViewController, SyncSigninDelegate {
     private func loadBundleCollection(uuid: String) {
         let bundleUrl = ServerHelper.bundleUrl(bundleUuid: uuid)
         DiscoverServerHandler.shared.discoverPodcastCollection(source: bundleUrl.absoluteString, authenticated: nil, completion: { podcastCollection in
-            guard let podcastCollection = podcastCollection else { return }
+            guard let podcastCollection else { return }
 
             DispatchQueue.main.async {
                 if let bundleTitle = podcastCollection.author {

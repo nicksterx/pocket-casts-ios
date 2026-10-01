@@ -1,6 +1,7 @@
 import SwiftUI
 import PocketCastsDataModel
 import Lottie
+import EndOfYear
 
 struct Top5Podcasts2025Story: ShareableStory {
     @Environment(\.renderForSharing) var renderForSharing: Bool
@@ -31,13 +32,10 @@ struct Top5Podcasts2025Story: ShareableStory {
                         view
                     } else {
                         ScrollView(.vertical) {
-                            if #available(iOS 16.4, *) {
-                                view.scrollIndicators(.never)
-                                    .scrollBounceBehavior(.basedOnSize)
-                            } else {
-                                view
-                            }
+                            view
                         }
+                        .scrollIndicators(.never)
+                        .scrollBounceBehavior(.basedOnSize)
                     }
                 }
                 .disabled(!isSmallScreen) // Disable scrolling on larger where we shouldn't be clipping.
@@ -104,7 +102,7 @@ fileprivate struct PodcastCellView: View {
         ZStack {
             HStack(spacing: 0) {
                 LottieView(animation: .named(animationName))
-                    .animationDidFinish({ completed in
+                    .animationDidFinish({ _ in
                     })
                     .configure({ animationView in
                         animationView.contentMode = .scaleToFill

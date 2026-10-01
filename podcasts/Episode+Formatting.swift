@@ -8,8 +8,8 @@ extension Episode {
 
     func shouldArchiveOnCompletion() -> Bool {
         #if !APPCLIP
-        if let podcast = parentPodcast(), podcast.isAutoArchiveOverridden {
-            return podcast.autoArchivePlayedAfterTime == 0 && (Settings.archiveStarredEpisodes() || !keepEpisode)
+        if let podcast = parentPodcast(), podcast.overrideGlobalArchive {
+            return podcast.autoArchivePlayedAfter == 0 && (Settings.archiveStarredEpisodes() || !keepEpisode)
         }
 
         return Settings.autoArchivePlayedAfter() == 0 && (Settings.archiveStarredEpisodes() || !keepEpisode)
@@ -27,7 +27,7 @@ extension Episode {
         !downloaded(pathFinder: DownloadManager.shared) &&
         !inProgress() &&
         !PlaybackManager.shared.inUpNext(episode: self) &&
-        !DataManager.sharedManager.playlistContainsEpisode(episodeUuid: uuid)
+        !DataManager.shared.playlistContainsEpisode(episodeUuid: uuid)
     }
 
     public func subTitle() -> String {

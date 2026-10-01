@@ -18,7 +18,7 @@ class ExtensionDelegate: NSObject, WKApplicationDelegate {
 
     private func setupCrashLogging() {
         crashLogging = try? CrashLogging(dataProvider: WatchCrashLoggingDataProvider()).start()
-        if let crashLogging = crashLogging {
+        if let crashLogging {
             ServerConfig.shared.errorLogger = WatchCrashLoggingErrorLogger(crashLogging: crashLogging)
         }
     }
@@ -96,8 +96,8 @@ class ExtensionDelegate: NSObject, WKApplicationDelegate {
         if SyncManager.isFirstSyncInProgress() { return }
 
         FileLog.shared.addMessage("Starting a background refresh")
-        let subscribedPodcasts = DataManager.sharedManager.allPodcasts(includeUnsubscribed: false)
-        BackgroundSyncManager.shared.performBackgroundRefresh(subscribedPodcasts: subscribedPodcasts)
+        let subscribedPodcasts = DataManager.shared.allPodcasts(includeUnsubscribed: false)
+        BackgroundSyncManager.shared.performBackgroundRefreshSafely(subscribedPodcasts: subscribedPodcasts)
     }
 
     private func scheduleNextRefresh() {
@@ -107,7 +107,7 @@ class ExtensionDelegate: NSObject, WKApplicationDelegate {
         FileLog.shared.addMessage("Scheduling next refresh for 60 minutes time")
         let preferredDate = Date(timeIntervalSinceNow: 60.minutes)
         WKApplication.shared().scheduleBackgroundRefresh(withPreferredDate: preferredDate, userInfo: nil) { error in
-            if let error = error {
+            if let error {
                 FileLog.shared.addMessage("Task scheduling error \(error.localizedDescription)")
             }
         }
@@ -143,6 +143,6 @@ private struct WatchCrashLoggingErrorLogger: ErrorLogger {
     let crashLogging: CrashLogging
 
     func log(error: Error, context: [String: String]?) {
-        crashLogging.logError(error, tags: context ?? [:], level: .warning)
+        FileLog.shared.addMessage("Watch Crash Logger: \(error.localizedDescription). Context: \(context?.debugDescription ?? "")")
     }
 }

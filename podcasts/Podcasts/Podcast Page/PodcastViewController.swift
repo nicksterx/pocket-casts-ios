@@ -3,6 +3,7 @@ import DifferenceKit
 import PocketCastsDataModel
 import PocketCastsServer
 import PocketCastsUtils
+import SJUtils
 import UIKit
 import UIDeviceIdentifier
 import SwiftUI
@@ -23,40 +24,22 @@ enum PodcastFeedReloadSource {
 }
 
 protocol PodcastActionsDelegate: AnyObject {
-    var hasSimilarShowsPublisher: AnyPublisher<Bool, Never> { get }
     var currentViewModePublisher: AnyPublisher<PodcastViewController.ViewMode, Never> { get }
     func isSummaryExpanded() -> Bool
     func setSummaryExpanded(expanded: Bool)
-    func isDescriptionExpanded() -> Bool
-    func setDescriptionExpanded(expanded: Bool)
 
     func tableView() -> UITableView
     func displayedPodcast() -> Podcast?
-    func episodeCount() -> Int
-    func archivedEpisodeCount() -> Int
 
-    func manageSubscriptionTapped()
     func settingsTapped()
     func fundingTapped()
     func folderTapped()
     func notificationTapped()
     func categoryTapped(_ category: String)
+    func networkTapped(listId: String)
     func subscribe()
     func unsubscribe()
     func refreshArtwork()
-    func searchEpisodes(query: String)
-    func clearSearch()
-    func toggleShowArchived()
-    func showingArchived() -> Bool
-    func archiveAllTapped(playedOnly: Bool)
-    func unarchiveAllTapped()
-    func downloadAllTapped()
-    func queueAllTapped()
-    func downloadableEpisodeCount(items: [ListItem]?) -> Int
-
-    func didActivateSearch()
-
-    func enableMultiSelect()
 
     var podcastRatingViewModel: PodcastRatingViewModel { get }
     var ratingView: UIView { get }
@@ -66,35 +49,36 @@ protocol PodcastActionsDelegate: AnyObject {
     func showYouMightLike()
     func showLogin(message: String?)
 
-    func shouldDisplayPodcastFeedReloadButton() -> Bool
-    func reloadPodcastFeed(source: PodcastFeedReloadSource)
-
     func open(url: URL)
 }
 
-class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, SyncSigninDelegate, MultiSelectActionDelegate {
+class PodcastViewController: PCViewController, PodcastActionsDelegate, MultiSelectActionDelegate {
     var podcast: Podcast?
     var episodeInfo = [ArraySection<String, ListItem>]()
     var uuidsThatMatchSearch = [String]()
     var featuredPodcast = false
     var listUuid: String?
     var summaryExpanded = false
-    var descriptionExpanded = false
     var currentViewMode: ViewMode = .episodes
     var hasSimilarShows = CurrentValueSubject<Bool, Never>(false)
     var isLoadingRecommendations = CurrentValueSubject<Bool, Never>(false)
     var currentViewModeSubject = CurrentValueSubject<ViewMode, Never>(.episodes)
-
-    var hasSimilarShowsPublisher: AnyPublisher<Bool, Never> {
-        hasSimilarShows.eraseToAnyPublisher()
-    }
 
     var currentViewModePublisher: AnyPublisher<ViewMode, Never> {
         currentViewModeSubject.eraseToAnyPublisher()
     }
 
     var recommendations: PodcastCollection?
-    var bookmarkViewModel: BookmarkPodcastListViewModel?
+
+    /// Opens the network the podcast belongs to, tapped in the header.
+    private lazy var networkNavigator: NetworkNavigator = {
+        let navigator = NetworkNavigator(source: .podcastScreenNetwork)
+        navigator.presenter = self
+        return navigator
+    }()
+
+    /// The bookmarks tab, created the first time it's displayed
+    var bookmarkList: BookmarkListController?
 
     enum ViewMode {
         case episodes
@@ -153,18 +137,16 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     @MainActor
     var isMultiSelectEnabled = false {
         didSet {
+            setEnclosingTabBarHidden(isMultiSelectEnabled, animated: false)
             // For non-episode cells we don't enable editing. It needs to be for Bookmarks and already if for You Might Like.
             if currentViewMode == .episodes {
                 self.episodesTable.beginUpdates()
-                self.episodesTable.setEditing(self.isMultiSelectEnabled, animated: true)
-                if self.episodesTable.numberOfSections > 0 {
-                    self.episodesTable.reloadSections(IndexSet(integersIn: 0..<self.episodesTable.numberOfSections), with: .none)
-                }
+                self.episodesTable.setEditing(isMultiSelectEnabled, animated: true)
                 self.episodesTable.endUpdates()
             }
 
             if self.isMultiSelectEnabled {
-                if self.selectedEpisodes.count == 0, self.longPressMultiSelectIndexPath == nil, !self.multiSelectGestureInProgress {
+                if self.selectedEpisodes.isEmpty, self.longPressMultiSelectIndexPath == nil, !self.multiSelectGestureInProgress {
                     self.tableView().scrollToRow(at: IndexPath(row: NSNotFound, section: PodcastViewController.allEpisodesSection), at: .top, animated: true)
                 }
                 self.multiSelectFooter.setSelectedCount(count: self.selectedEpisodes.count)
@@ -172,21 +154,17 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
                     self.tableView().selectIndexPath(selectedIndexPath)
                     self.longPressMultiSelectIndexPath = nil
                 }
-                self.multiSelectHeaderView.backgroundColor = ThemeColor.primaryUi01()
-                self.multiSelectCancelBtn.setTitleColor(ThemeColor.primaryIcon01(), for: .normal)
-                self.multiSelectAllBtn.setTitleColor(ThemeColor.primaryIcon01(), for: .normal)
-                self.updateSelectAllBtn()
-                self.multiSelectFooterBottomConstraint.constant = PlaybackManager.shared.currentEpisode() == nil ? 16 : Constants.Values.miniPlayerOffset + 16
-                self.multiSelectHeaderView.isHidden = false
-                self.view.bringSubviewToFront(self.multiSelectHeaderView)
-
-                // Adjusts multiSelectHeaderView based on screen width
-                self.setMultiSelectHeaderViewConstraint()
+                self.multiSelectFooterBottomConstraint.constant = Constants.effectiveFooterViewPadding
             } else {
-                self.multiSelectHeaderView.isHidden = true
                 self.selectedEpisodes.removeAll()
             }
+            // The bookmarks tab shows the action bar of the bookmarks lists instead of the table's own footer
+            if currentViewMode == .bookmarks {
+                self.multiSelectFooter.isHidden = true
+            }
+            self.updateMultiSelectNavBar()
             searchController?.isOverflowButtonEnabled = !self.isMultiSelectEnabled
+            bookmarkList?.isOverflowButtonEnabled = !self.isMultiSelectEnabled
         }
     }
 
@@ -207,38 +185,29 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         }
     }
 
-    @IBOutlet var multiSelectCancelBtn: UIButton! {
-        didSet {
-            multiSelectCancelBtn.setTitle(L10n.cancel, for: .normal)
-        }
-    }
-
-    @IBOutlet var multiSelectAllBtn: UIButton!
-    @IBOutlet var multiSelectHeaderView: ThemeableView!
     private let operationQueue = OperationQueue()
 
-    // Constraint to adjust multiSelectHeader based on device size
-    @IBOutlet weak var multiSelectHeaderViewConstraint: NSLayoutConstraint!
+    private var shareBarButtonItem: UIBarButtonItem?
+    private var defaultBackBarButton: UIBarButtonItem?
+    var multiSelectAllBarButton: UIBarButtonItem?
+    var multiSelectCancelBarButton: UIBarButtonItem?
 
-    private func setMultiSelectHeaderViewConstraint() {
-        let heightConstant: CGFloat = 40
-        self.multiSelectHeaderViewConstraint.constant = heightConstant + view.safeAreaInsets.top
-    }
+    private lazy var navTitleLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        label.textAlignment = .center
+        label.alpha = 0
+        return label
+    }()
 
     static let headerSection = 0
     static let allEpisodesSection = 1
-    static let podrollSection = 1
-    static let similarShowsSection = 2
 
     private var isSearching = false
     private var cancellables = Set<AnyCancellable>()
     private var podcastFeedViewModel: PodcastFeedViewModel?
-    private var refreshControl: CustomRefreshControl?
+    private var refreshController: PodcastFeedRefreshController?
     private var podcastFeedReloadTooltip: UIViewController?
-
-    // Hosting for the SwiftUI action bar used by the Bookmarks list when embedded
-    private var bookmarksActionBarHost: UIHostingController<AnyView>?
-    private var bookmarksActionBarBottomConstraint: NSLayoutConstraint?
 
     lazy var ratingView: UIView = {
         let view = StarRatingView(viewModel: podcastRatingViewModel,
@@ -250,11 +219,6 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         view.backgroundColor = .clear
         return view
     }()
-
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-        setMultiSelectHeaderViewConstraint()
-    }
 
     init(podcast: Podcast) {
         self.podcast = podcast
@@ -269,7 +233,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     init(podcastInfo: PodcastInfo, existingImage: UIImage?) {
-        if let uuid = podcastInfo.uuid, let existingPodcast = DataManager.sharedManager.findPodcast(uuid: uuid, includeUnsubscribed: true) {
+        if let uuid = podcastInfo.uuid, let existingPodcast = DataManager.shared.findPodcast(uuid: uuid, includeUnsubscribed: true) {
             podcast = existingPodcast
             summaryExpanded = !existingPodcast.isSubscribed()
         } else {
@@ -295,7 +259,12 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     override func viewDidLoad() {
+        supportsGoogleCast = true
+        useTransparentNavigationBarAppearance = true
+
         super.viewDidLoad()
+
+        view.backgroundColor = ThemeColor.primaryUi01()
 
         if FeatureFlag.podcastFeedUpdate.enabled {
             podcastFeedViewModel = PodcastFeedViewModel(uuid: podcast?.uuid ?? podcastInfo?.uuid)
@@ -304,16 +273,10 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
             forceCollapsingHeaderIfNeeded()
         }
 
-        closeTapped = { [weak self] in
-            _ = self?.navigationController?.popViewController(animated: true)
-        }
-
-        searchController = EpisodeListSearchController()
-        searchController?.podcastDelegate = self
+        setupSearchController()
 
         operationQueue.maxConcurrentOperationCount = 1
 
-        scrollPointToChangeTitle = PodcastHeaderView.Constants.smallImageSize
         episodesTable.themeStyle = .primaryUi02
         episodesTable.addSubview(blurHeaderView)
         let blurHeaderPositionConstraint = blurHeaderView.bottomAnchor.constraint(equalTo: episodesTable.topAnchor, constant: blurHeaderPosition)
@@ -325,8 +288,44 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         ])
         self.blurHeaderPositionConstraint = blurHeaderPositionConstraint
 
-        addRightAction(image: UIImage(named: "podcast-share"), accessibilityLabel: L10n.share, action: #selector(shareTapped(_:)))
-        addGoogleCastBtn()
+        navigationItem.titleView = {
+            // The label has to go inside a container view other view navigationBar changes its alpha
+            let view = UIView()
+            view.addSubview(navTitleLabel)
+            navTitleLabel.anchorToAllSidesOf(view: view)
+            return view
+        }()
+        shareBarButtonItem = FakeNavBarButton.makeBarButtonItem(
+            image: UIImage(named: "podcast-share"),
+            accessibilityLabel: L10n.share,
+            target: self,
+            action: #selector(shareTapped)
+        )
+        customRightBtn = shareBarButtonItem
+
+        if !LiquidGlass.isEnabled {
+            defaultBackBarButton = FakeNavBarButton.makeBarButtonItem(
+                image: UIImage(systemName: "chevron.backward"),
+                accessibilityLabel: L10n.back,
+                target: self,
+                action: #selector(backButtonTapped)
+            )
+            navigationItem.leftBarButtonItem = defaultBackBarButton
+            navigationItem.setHidesBackButton(true, animated: false)
+
+            if let navController = navigationController as? PCNavigationController {
+                navController.enableInteractivePopGestureWorkaround()
+            } else {
+                assertionFailure("Expected PCNavigationController")
+            }
+        }
+
+        if podcast != nil, episodeInfo.isEmpty {
+            let searchHeader = ListHeader(headerTitle: L10n.search, isSectionHeader: true, sectionNumber: -1)
+            episodeInfo = [ArraySection(model: searchHeader.headerTitle, elements: [searchHeader])]
+            reloadData()
+        }
+
         loadPodcastInfo()
 
         NotificationCenter.default.addObserver(self, selector: #selector(podcastUpdated(_:)), name: Constants.Notifications.podcastUpdated, object: nil)
@@ -334,49 +333,41 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
 
         listenForBookmarkChanges()
         setupLogin()
-        setupBookmarkViewModel()
 
         setupRefreshControl()
-
-        // Keep external action bar aligned with mini player
-        NotificationCenter.default.addObserver(self, selector: #selector(miniPlayerStatusDidChange), name: Constants.Notifications.miniPlayerDidAppear, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(miniPlayerStatusDidChange), name: Constants.Notifications.miniPlayerDidDisappear, object: nil)
     }
 
-    override func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        super.scrollViewDidScroll(scrollView)
+    private var isScrolledPastHeader = false
+    private var isNavBarBlurred = false
 
-        if scrollView.isDragging || scrollView.isDecelerating {
-            dismissKeyboardForScrollIfNeeded()
-        }
-        if FeatureFlag.podcastFeedUpdate.enabled {
-            refreshControl?.scrollViewDidScroll(scrollView)
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        let offset = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+        let scrolled = offset > PodcastHeaderView.Constants.smallImageSize + view.safeAreaInsets.top
+        if scrolled != isScrolledPastHeader {
+            isScrolledPastHeader = scrolled
+            UIView.animate(withDuration: Constants.Animation.defaultAnimationTime) {
+                self.navTitleLabel.alpha = scrolled ? 1 : 0
+            }
+            updateNavBarBlur()
         }
     }
 
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if FeatureFlag.podcastFeedUpdate.enabled {
-            refreshControl?.scrollViewDidEndDragging(scrollView)
-        }
+    /// Forces the standard (blurred) navigation bar appearance whenever multi-select is on or the
+    /// user has scrolled past the header. Multi-select uses plain text bar buttons that can't sit
+    /// on the transparent over-artwork chrome (pre-iOS 26), so we lock the bar to its blurred state
+    /// while it's active. On iOS 26 `setTransparentNavBarScrolled` is a no-op for the bar visuals,
+    /// so this is effectively a pre-26 fix.
+    private func updateNavBarBlur() {
+        let shouldBlur = isMultiSelectEnabled || isScrolledPastHeader
+        guard shouldBlur != isNavBarBlurred else { return }
+        isNavBarBlurred = shouldBlur
+        setTransparentNavBarScrolled(shouldBlur)
     }
 
     private func setupLogin() {
-        podcastRatingViewModel.presentLogin = { [weak self] viewModel in
+        podcastRatingViewModel.presentLogin = { [weak self] _ in
             self?.showLogin(message: L10n.ratingLoginRequired)
         }
-    }
-
-    private func setupBookmarkViewModel() {
-        guard let podcast = podcast else { return }
-
-        let sortOption = Settings.podcastBookmarksSort
-        let viewModel = BookmarkPodcastListViewModel(podcast: podcast,
-                                                      bookmarkManager: PlaybackManager.shared.bookmarkManager,
-                                                      sortOption: sortOption)
-        viewModel.analyticsSource = .podcasts
-        viewModel.router = self
-
-        self.bookmarkViewModel = viewModel
     }
 
     func showLogin(message: String?) {
@@ -421,7 +412,6 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         if let _ = [podcast?.uuid, podcastInfo?.uuid].compactMap({ $0 }).first {
             podcastRatingViewModel.update(podcast: podcast)
         }
-        self.navigationController?.isNavigationBarHidden = true
         updateColors()
     }
 
@@ -456,9 +446,6 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         addCustomObserver(Constants.Notifications.playbackStarted, selector: #selector(hideSearchKeyboard))
         addCustomObserver(Constants.Notifications.playbackEnded, selector: #selector(refreshEpisodes))
         addCustomObserver(Constants.Notifications.playbackFailed, selector: #selector(refreshEpisodes))
-        addCustomObserver(Constants.Notifications.upNextEpisodeRemoved, selector: #selector(upNextChanged))
-        addCustomObserver(Constants.Notifications.upNextEpisodeAdded, selector: #selector(upNextChanged))
-        addCustomObserver(Constants.Notifications.upNextQueueChanged, selector: #selector(upNextChanged))
         addCustomObserver(Constants.Notifications.searchRequested, selector: #selector(searchRequested))
 
         // Episode grouping can change based on download and play status, so listen for both those events and refresh when they happen
@@ -472,7 +459,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         }
 
         // if it's a local podcast, refresh it when the view appears, eg: when you tab back to it
-        if let podcast = podcast, podcast.isSubscribed(), hasAppearedAlready {
+        if let podcast, podcast.isSubscribed(), hasAppearedAlready {
             refreshEpisodes()
         }
 
@@ -485,10 +472,8 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         Analytics.track(.podcastScreenShown, properties: properties)
 
         if FeatureFlag.podcastFeedUpdate.enabled {
-            refreshControl?.parentViewControllerDidAppear()
             showPodcastFeedReloadTipIfNeeded()
         }
-        self.navigationController?.isNavigationBarHidden = true
         showViewChangesTipIfNeeded()
 
         // Load recommendations when view appears
@@ -513,24 +498,24 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
 
         removeAllCustomObservers()
 
-        if FeatureFlag.podcastFeedUpdate.enabled {
-            refreshControl?.parentViewControllerDidDisappear()
+        if FeatureFlag.podcastFeedUpdate.enabled, let refreshControl = refreshController?.refreshControl, refreshControl.isRefreshing {
+            refreshControl.endRefreshing()
         }
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
 
-        guard let window = view.window else { return }
-
-        let multiSelectFooterOffset: CGFloat = isMultiSelectEnabled ? 80 : 0
-        let miniPlayerOffset: CGFloat = PlaybackManager.shared.currentEpisode() == nil ? 0 : Constants.Values.miniPlayerOffset
-        episodesTable.contentInset = UIEdgeInsets(top: navBarHeight(window: window), left: 0, bottom: miniPlayerOffset + multiSelectFooterOffset, right: 0)
-        episodesTable.verticalScrollIndicatorInsets = episodesTable.contentInset
+        episodesTable.contentInset.bottom = Constants.effectiveMiniPlayerOffset + (isMultiSelectEnabled ? 80 : 0)
+        episodesTable.verticalScrollIndicatorInsets.bottom = episodesTable.contentInset.bottom
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
         return .default
+    }
+
+    override func contentScrollView(for edge: NSDirectionalRectEdge) -> UIScrollView? {
+        episodesTable
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -543,16 +528,16 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     @objc private func searchRequested() {
-        guard podcast != nil, let searchBar = searchController?.searchTextField else { return }
+        guard podcast != nil else { return }
 
-        searchBar.becomeFirstResponder()
+        searchController?.beginEditing()
     }
 
     @objc private func colorsDidDownload(_ notification: Notification) {
         guard let uuidLoaded = notification.object as? String else { return }
 
         if let uuid = podcast?.uuid, uuid == uuidLoaded {
-            if let podcast = DataManager.sharedManager.findPodcast(uuid: uuid, includeUnsubscribed: true) {
+            if let podcast = DataManager.shared.findPodcast(uuid: uuid, includeUnsubscribed: true) {
                 self.podcast = podcast
             }
             updateColors()
@@ -560,22 +545,16 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func reloadData() {
+        if currentViewMode == .bookmarks {
+            bookmarkList?.rebuildRows()
+        }
         episodesTable.reloadData()
     }
 
     private func updateColors() {
+        view.backgroundColor = ThemeColor.primaryUi01()
         reloadData()
-        if let podcast = podcast {
-            updateNavColors(bgColor: .clear, titleColor: ThemeColor.primaryText01(), buttonColor: UIColor.white, buttonBackgroundColor: UIColor.black.withAlphaComponent(0.32))
-
-            multiSelectHeaderView.backgroundColor = ThemeColor.primaryUi01()
-            multiSelectCancelBtn.setTitleColor(ThemeColor.primaryIcon01(), for: .normal)
-            multiSelectAllBtn.setTitleColor(ThemeColor.primaryIcon01(), for: .normal)
-            // we need to do this for scenarios when theme was changed
-            updateNavigationBar(position: episodesTable.contentOffset.y)
-        } else {
-            updateNavColors(bgColor: .clear, titleColor: ThemeColor.primaryText01(), buttonColor: UIColor.white, buttonBackgroundColor: UIColor.black.withAlphaComponent(0.32))
-        }
+        navTitleLabel.textColor = ThemeColor.primaryText01()
     }
 
     override func handleThemeChanged() {
@@ -585,7 +564,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     @objc private func podcastUpdated(_ notification: Notification) {
         guard let podcastUuid = notification.object as? String, podcastUuid == podcast?.uuid else { return }
 
-        podcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid, includeUnsubscribed: true)
+        podcast = DataManager.shared.findPodcast(uuid: podcastUuid, includeUnsubscribed: true)
         if viewIfLoaded?.window != nil {
             refreshEpisodes()
         }
@@ -594,14 +573,14 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     @objc private func folderChanged(_ notification: Notification) {
         guard let podcastUuid = podcast?.uuid else { return }
 
-        podcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid, includeUnsubscribed: true)
+        podcast = DataManager.shared.findPodcast(uuid: podcastUuid, includeUnsubscribed: true)
         if viewIfLoaded?.window != nil {
             refreshEpisodes()
         }
     }
 
     @objc private func refreshEpisodes() {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         loadLocalEpisodes(podcast: podcast, animated: true)
     }
@@ -610,16 +589,16 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         reloadData()
     }
 
-    @objc private func shareTapped(_ sender: UIButton) {
-        guard let podcast = podcast else { return }
+    @objc private func shareTapped() {
+        guard let podcast else { return }
 
-        let sourceRect = sender.superview!.convert(sender.frame, to: view)
-        SharingHelper.shared.shareLinkTo(podcast: podcast, fromController: self, fromSource: analyticsSource, sourceRect: sourceRect, sourceView: view)
+        // - warning: important to pass shareBarButtonItem
+        SharingHelper.shared.shareLinkTo(podcast: podcast, fromController: self, fromSource: analyticsSource, barButtonItem: shareBarButtonItem)
         Analytics.track(.podcastScreenShareTapped, properties: ["podcast_uuid": podcast.uuid, "is_private": podcast.isPrivate])
     }
 
     private func loadPodcastInfo() {
-        if let podcast = podcast {
+        if let podcast {
             if podcast.isSubscribed() {
                 loadLocalEpisodes(podcast: podcast, animated: false)
                 checkIfPodcastNeedsUpdating()
@@ -627,7 +606,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
                 let podcastUuid = podcast.uuid
                 Task {
                     await PodcastManager.shared.deletePodcastIfUnused(podcast)
-                    if let _ = DataManager.sharedManager.findPodcast(uuid: podcastUuid, includeUnsubscribed: true) {
+                    if let _ = DataManager.shared.findPodcast(uuid: podcastUuid, includeUnsubscribed: true) {
                         // podcast wasn't deleted, but needs to be updated
                         loadLocalEpisodes(podcast: podcast, animated: false)
                         checkIfPodcastNeedsUpdating()
@@ -646,22 +625,22 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func loadLocalEpisodes(podcast: Podcast, animated: Bool) {
-        let uuidsToFilter = (searchController?.searchInProgress() ?? false) ? uuidsThatMatchSearch : nil
+        let uuidsToFilter = isSearching ? uuidsThatMatchSearch : nil
         let refreshOperation = PodcastEpisodesRefreshOperation(podcast: podcast, uuidsToFilter: uuidsToFilter) { [weak self] newData in
-            guard let self = self else { return }
+            guard let self else { return }
 
-            self.navTitle = podcast.title
+            self.navTitleLabel.text = podcast.title
 
             // add the episode limit placehold if it's needed
             var finalData = newData
             var needsNoEpisodesMessage = false
             var needsNoSearchResultsMessage = false
-            let searching = self.searchController?.searchTextField?.text?.count ?? 0 > 0
+            let searching = self.searchController?.searchText.isEmpty == false
             if podcast.podcastGrouping() == .none {
-                let episodeLimit = Int(podcast.autoArchiveEpisodeLimitCount)
+                let episodeLimit = Int(podcast.autoArchiveEpisodeLimit)
                 var episodes = newData[safe: 1]?.elements
                 let episodeCount = episodes?.count ?? 0
-                if episodeCount > 0, episodeLimit > 0, podcast.isAutoArchiveOverridden {
+                if episodeCount > 0, episodeLimit > 0, podcast.overrideGlobalArchive {
                     var indexToInsertAt = -1
 
                     let episodeSortOrder = podcast.podcastSortOrder
@@ -723,7 +702,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
                 self.episodeInfo = finalData
                 reloadData()
             }
-            self.searchController?.episodesDidReload()
+            self.updateSearchHeader()
             if self.isMultiSelectEnabled {
                 self.updateSelectAllBtn()
             }
@@ -739,15 +718,15 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     // MARK: - PodcastActionsDelegate
 
     func refreshArtwork() {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         let optionsPicker = OptionsPicker(title: nil)
-        let refreshAction = OptionAction(label: L10n.podcastRefreshArtwork, icon: nil) {
-            ImageManager.sharedManager.clearCache(podcastUuid: podcast.uuid, recacheWhenDone: true)
+        let refreshAction = OptionAction(label: L10n.podcastRefreshArtwork, icon: "option-download-retry") {
+            ImageManager.shared.clearCache(podcastUuid: podcast.uuid, recacheWhenDone: true)
         }
         optionsPicker.addAction(action: refreshAction)
 
-        optionsPicker.show(statusBarStyle: preferredStatusBarStyle)
+        optionsPicker.present(from: self)
     }
 
     func unsubscribe() {
@@ -760,25 +739,27 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
             }
         }
 
-        let optionPicker = OptionsPicker(title: downloadedCount > 0 ? nil : L10n.areYouSure)
-        let label = FeatureFlag.useFollowNaming.enabled ? L10n.unfollow : L10n.unsubscribe
-        let unsubscribeAction = OptionAction(label: label, icon: nil, action: { [weak self] in
+        let title: String
+        let message: String?
+        if downloadedCount > 0 {
+            title = L10n.downloadedFilesConf(downloadedCount)
+            message = L10n.downloadedFilesConfMessageNew
+        } else {
+            title = L10n.areYouSure
+            message = nil
+        }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: L10n.cancel, style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.unfollow, style: .destructive) { [weak self] _ in
             self?.performUnsubscribe()
         })
-        if downloadedCount > 0 {
-            unsubscribeAction.destructive = true
-            let message = FeatureFlag.useFollowNaming.enabled ? L10n.downloadedFilesConfMessageNew : L10n.downloadedFilesConfMessage
-            optionPicker.addDescriptiveActions(title: L10n.downloadedFilesConf(downloadedCount), message: message, icon: "option-alert", actions: [unsubscribeAction])
-        } else {
-            optionPicker.addAction(action: unsubscribeAction)
-        }
-        optionPicker.show(statusBarStyle: preferredStatusBarStyle)
+        present(alert, animated: true)
 
         Analytics.track(.podcastScreenUnsubscribeTapped)
     }
 
     private func performUnsubscribe() {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         PodcastManager.shared.unsubscribe(podcast: podcast)
         navigationController?.popViewController(animated: true)
@@ -786,13 +767,13 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func subscribe() {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         podcast.subscribed = 1
         podcast.syncStatus = SyncStatus.notSynced.rawValue
         podcast.autoDownloadSetting = (FeatureFlag.autoDownloadOnSubscribe.enabled && Settings.autoDownloadEnabled() && Settings.autoDownloadOnFollow() ? AutoDownloadSetting.latest : AutoDownloadSetting.off).rawValue
-        DataManager.sharedManager.save(podcast: podcast)
-        ServerPodcastManager.shared.updateLatestEpisodeInfo(podcast: podcast, setDefaults: true, autoDownloadLimit: Settings.autoDownloadOnFollow() ? Settings.autoDownloadLimits().rawValue : 0)
+        DataManager.shared.save(podcast: podcast)
+        ServerPodcastManager.shared.updateLatestEpisodeInfo(podcast: podcast, setDefaults: true, autoDownloadLimit: Settings.autoDownloadOnFollow() ? Settings.autoDownloadLimits.rawValue : 0)
         loadLocalEpisodes(podcast: podcast, animated: true)
 
         if featuredPodcast {
@@ -809,6 +790,43 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         Analytics.track(.podcastSubscribed, properties: ["source": analyticsSource, "uuid": podcast.uuid])
     }
 
+    // MARK: - Multi-select nav bar
+
+    func updateMultiSelectNavBar() {
+        if isMultiSelectEnabled {
+            supportsGoogleCast = false
+            let cancel = UIBarButtonItem(title: L10n.cancel, style: .plain, target: self, action: #selector(cancelTapped))
+            cancel.accessibilityLabel = L10n.accessibilityCancelMultiselect
+            multiSelectCancelBarButton = cancel
+            customRightBtn = cancel
+
+            let selectAll = UIBarButtonItem(title: L10n.selectAll, style: .plain, target: self, action: #selector(selectAllTapped))
+            multiSelectAllBarButton = selectAll
+            navigationItem.setLeftBarButton(selectAll, animated: true)
+            if LiquidGlass.isEnabled {
+                navigationItem.setHidesBackButton(true, animated: true)
+            }
+            updateSelectAllBtn()
+        } else {
+            multiSelectCancelBarButton = nil
+            multiSelectAllBarButton = nil
+            customRightBtn = shareBarButtonItem
+            if LiquidGlass.isEnabled {
+                navigationItem.setLeftBarButton(nil, animated: true)
+                navigationItem.setHidesBackButton(false, animated: true)
+            } else {
+                navigationItem.setLeftBarButton(defaultBackBarButton, animated: false)
+            }
+            supportsGoogleCast = true
+            refreshRightButtons()
+        }
+        updateNavBarBlur()
+    }
+
+    @objc private func backButtonTapped() {
+        navigationController?.popViewController(animated: true)
+    }
+
     func isSummaryExpanded() -> Bool {
         summaryExpanded
     }
@@ -821,18 +839,6 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         }
     }
 
-    func isDescriptionExpanded() -> Bool {
-        descriptionExpanded
-    }
-
-    func setDescriptionExpanded(expanded: Bool) {
-        descriptionExpanded = expanded
-    }
-
-    @objc private func miniPlayerStatusDidChange() {
-        updateBookmarksActionBarBottomConstraint()
-    }
-
     func tableView() -> UITableView {
         episodesTable
     }
@@ -842,19 +848,19 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func episodeCount() -> Int {
-        guard let podcast = podcast else { return 0 }
+        guard let podcast else { return 0 }
 
-        return DataManager.sharedManager.count(query: "SELECT COUNT(*) FROM \(DataManager.episodeTableName) WHERE podcast_id == ?", values: [podcast.id])
+        return DataManager.shared.count(query: "SELECT COUNT(*) FROM \(DataManager.episodeTableName) WHERE podcast_id == ?", values: [podcast.id])
     }
 
     func archivedEpisodeCount() -> Int {
-        guard let podcast = podcast else { return 0 }
+        guard let podcast else { return 0 }
 
-        return DataManager.sharedManager.count(query: "SELECT COUNT(*) FROM \(DataManager.episodeTableName) WHERE podcast_id == ? AND archived = 1", values: [podcast.id])
+        return DataManager.shared.count(query: "SELECT COUNT(*) FROM \(DataManager.episodeTableName) WHERE podcast_id == ? AND archived = 1", values: [podcast.id])
     }
 
     func settingsTapped() {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         let settingsController = PodcastSettingsViewController(podcast: podcast)
         settingsController.episodes = episodeInfo
@@ -866,19 +872,6 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         Analytics.track(.podcastScreenFundingTapped, properties: ["podcast_uuid": podcast?.uuid ?? ""])
         guard let urlString = podcast?.fundingURL, let url = URL(string: urlString) else { return }
         UIApplication.shared.open(url, options: [:], completionHandler: nil)
-    }
-
-    func manageSubscriptionTapped() {
-        guard SyncManager.isUserLoggedIn() else {
-            let signinPage = SyncSigninViewController()
-            signinPage.delegate = self
-
-            navigationController?.pushViewController(signinPage, animated: true)
-            return
-        }
-        guard let podcast = podcast, let bundle = SubscriptionHelper.bundleSubscriptionForPodcast(podcastUuid: podcast.uuid) else { return }
-        let subscriptionController = SupporterPodcastViewController(bundleSubscription: bundle)
-        navigationController?.pushViewController(subscriptionController, animated: true)
     }
 
     func didActivateSearch() {
@@ -896,11 +889,11 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     func folderTapped() {
         Analytics.track(.podcastScreenFolderTapped)
         if !SubscriptionHelper.hasActiveSubscription() {
-            NavigationManager.sharedManager.showUpsellView(from: self, source: .folders)
+            NavigationManager.shared.showUpsellView(from: self, source: .folders)
             return
         }
 
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         if let currentFolder = podcast.folderUuid, !currentFolder.isEmpty {
             // podcast is already in a folder, present the options for removing/moving it
@@ -916,71 +909,68 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         guard let podcast else {
             return
         }
-        let newValue = !podcast.isPushEnabled
+        let newValue = !podcast.pushEnabled
         Analytics.track(.podcastScreenNotificationsTapped, properties: ["enabled": newValue])
-        NotificationsHelper.shared.registerForPushNotifications() { granted in
-            guard granted || !newValue else {
-                Toast.show(L10n.notificationsPermissionsNeedsAction, actions: [.init(title: L10n.notificationsPermissionsOpenSettings, action: {
-                    Analytics.track(.notificationsPermissionsOpenSystemSettings)
-                    UIApplication.shared.openNotificationSettings()
-                })])
-                return
-            }
-            PodcastManager.shared.setNotificationsEnabled(podcast: podcast, enabled: newValue)
-            NotificationCenter.postOnMainThread(notification: Constants.Notifications.podcastUpdated, object: podcast.uuid)
-            var message = newValue ? L10n.notificationsOn : L10n.notificationsOff
-            if let title = podcast.title, newValue {
-                message = L10n.notificationsOnForPodcast(title)
-            }
-            Toast.show(message)
-        }
+        NotificationsHelper.shared.setNotificationsEnabled(newValue, for: podcast)
     }
 
     func categoryTapped(_ category: String) {
-        NavigationManager.sharedManager.navigateTo(NavigationManager.discoverPageKey, data: [NavigationManager.discoverCategoryKey: category])
+        NavigationManager.shared.navigateTo(NavigationManager.discoverPageKey, data: [NavigationManager.discoverCategoryKey: category])
         Analytics.track(.podcastScreenCategoryTapped, properties: ["category": category])
     }
 
+    func networkTapped(listId: String) {
+        Analytics.track(.podcastScreenNetworkTapped, properties: ["podcast_uuid": podcast?.uuid ?? "", "list_id": listId])
+        networkNavigator.show(listId: listId)
+    }
+
     func searchEpisodes(query: String) {
+        guard !query.isEmpty else {
+            clearSearch()
+            return
+        }
+
+        // don't allow searching for less than 2 characters
+        guard query.count > 1 else { return }
+
+        searchController?.isLoading = true
         performEpisodeSearch(query: query)
+
         if !isSearching {
             isSearching = true
             Analytics.track(.podcastScreenSearchPerformed)
         }
     }
 
-    func clearSearch() {
-        guard let podcast = podcast else { return }
+    private func clearSearch() {
+        guard let podcast else { return }
 
+        searchController?.isLoading = false
+        isSearching = false
         uuidsThatMatchSearch.removeAll()
         loadLocalEpisodes(podcast: podcast, animated: true)
-        isSearching = false
         Analytics.track(.podcastScreenSearchCleared)
     }
 
     func toggleShowArchived() {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
-        podcast.shouldShowArchived = !podcast.shouldShowArchived
-        DataManager.sharedManager.save(podcast: podcast)
+        podcast.showArchived = !podcast.showArchived
+        DataManager.shared.save(podcast: podcast)
         loadLocalEpisodes(podcast: podcast, animated: true)
 
-        Analytics.track(.podcastScreenToggleArchived, properties: ["show_archived": podcast.shouldShowArchived])
+        Analytics.track(.podcastScreenToggleArchived, properties: ["show_archived": podcast.showArchived])
     }
 
     func showingArchived() -> Bool {
-        podcast?.shouldShowArchived ?? false
+        podcast?.showArchived ?? false
     }
 
-    func archiveAllTapped(playedOnly: Bool) {
-        archiveAll(playedOnly: playedOnly)
-    }
+    func unarchiveAll() {
+        guard let podcast else { return }
 
-    func unarchiveAllTapped() {
-        guard let podcast = podcast else { return }
-
-        DispatchQueue.global().async {
-            DataManager.sharedManager.markAllUnarchivedForPodcast(id: podcast.id)
+        DispatchQueue.global().async { [self] in
+            DataManager.shared.markAllUnarchived(forPodcastId: podcast.id)
 
             AnalyticsEpisodeHelper.shared.currentSource = .podcastScreen
             AnalyticsEpisodeHelper.shared.bulkUnarchiveEpisodes(count: self.episodeCount())
@@ -994,10 +984,10 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func archiveAll(playedOnly: Bool = false) {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         DispatchQueue.global().async { [weak self] in
-            guard let allObjects = self?.episodeInfo[safe: 1]?.elements, allObjects.count > 0 else { return }
+            guard let allObjects = self?.episodeInfo[safe: 1]?.elements, !allObjects.isEmpty else { return }
 
             var count = 0
             for object in allObjects {
@@ -1019,9 +1009,9 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         }
     }
 
-    func downloadAllTapped() {
+    func downloadAll() {
         DispatchQueue.global().async { [weak self] in
-            guard let self = self, let allObjects = self.episodeInfo[safe: 1]?.elements, allObjects.count > 0 else { return }
+            guard let self, let allObjects = self.episodeInfo[safe: 1]?.elements, !allObjects.isEmpty else { return }
 
             let episodes = allObjects.compactMap { ($0 as? ListEpisode)?.episode }
             AnalyticsEpisodeHelper.shared.currentSource = .podcastScreen
@@ -1032,7 +1022,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func showOptionsFor(season: Int) {
-        guard let podcast else {
+        guard podcast != nil else {
             return
         }
 
@@ -1049,7 +1039,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
             archiveActionForSeason(season)
         ].compactMap(\.self))
 
-        optionPicker.show(statusBarStyle: AppTheme.defaultStatusBarStyle())
+        optionPicker.present(from: self)
     }
 
     private func downloadActionForSeason(_ season: Int) -> OptionAction? {
@@ -1063,7 +1053,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         }
         if allDownloaded {
             return .init(label: L10n.removeAll, icon: "episode-remove-download") {
-                EpisodeManager.removeDownloadForEpisodes(episodes)
+                EpisodeManager.removeDownload(for: episodes)
                 Analytics.track(.podcastScreenSeasonOptionsRemoveAllTapped, properties: ["season": season])
             }
         } else {
@@ -1077,7 +1067,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     private func archiveActionForSeason(_ season: Int) -> OptionAction? {
         guard let podcast else { return nil }
         let unarchivedQuery = "SELECT COUNT(*) FROM \(DataManager.episodeTableName) WHERE podcast_id = ? AND archived = 0 AND seasonNumber = ?"
-        let unarchivedCount = DataManager.sharedManager.count(query: unarchivedQuery, values: [podcast.id, season])
+        let unarchivedCount = DataManager.shared.count(query: unarchivedQuery, values: [podcast.id, season])
         if unarchivedCount > 0 {
             return OptionAction(label: L10n.podcastArchiveAll, icon: "options-archiveall") { [weak self] in
                 self?.archiveAllSeasonTapped(season: season)
@@ -1093,7 +1083,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
 
     private func episodesForSeason(_ season: Int) -> [ListEpisode] {
         guard let allObjects = self.episodeInfo[safe: 1]?.elements,
-              allObjects.count > 0
+              !allObjects.isEmpty
         else {
             return []
         }
@@ -1118,17 +1108,23 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func downloadSeasonTapped(season: Int) {
-        DispatchQueue.global().async { [weak self] in
-            guard let self = self else { return }
+        let listEpisodesForSeason = episodesForSeason(season)
+        let episodes = listEpisodesForSeason.map { $0.episode }
 
-            let listEpisodesForSeason = episodesForSeason(season)
-            let episodes = listEpisodesForSeason.map { $0.episode }
+        NetworkUtils.shared.downloadEpisodeRequested(autoDownloadStatus: .notSpecified, { [weak self] later in
+            DispatchQueue.global().async {
+                guard let self else { return }
 
-            AnalyticsEpisodeHelper.shared.currentSource = .podcastScreen
-            AnalyticsEpisodeHelper.shared.bulkDownloadEpisodes(episodes: episodes)
+                AnalyticsEpisodeHelper.shared.currentSource = .podcastScreen
+                AnalyticsEpisodeHelper.shared.bulkDownloadEpisodes(episodes: episodes)
 
-            self.downloadItems(allObjects: listEpisodesForSeason)
-        }
+                if later {
+                    self.queueItems(allObjects: listEpisodesForSeason)
+                } else {
+                    self.downloadItems(allObjects: listEpisodesForSeason)
+                }
+            }
+        }, disallowed: nil)
     }
 
     func archiveAllSeasonTapped(season: Int) {
@@ -1160,9 +1156,9 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         }
     }
 
-    func queueAllTapped() {
+    func queueAll() {
         DispatchQueue.global().async { [weak self] in
-            guard let self = self, let allObjects = self.episodeInfo[safe: 1]?.elements, allObjects.count > 0 else { return }
+            guard let self, let allObjects = self.episodeInfo[safe: 1]?.elements, !allObjects.isEmpty else { return }
             self.queueItems(allObjects: allObjects)
         }
     }
@@ -1186,7 +1182,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func downloadableEpisodeCount(items: [ListItem]? = nil) -> Int {
-        guard let allObjects = items == nil ? episodeInfo[safe: 1]?.elements : items, allObjects.count > 0 else { return 0 }
+        guard let allObjects = items == nil ? episodeInfo[safe: 1]?.elements : items, !allObjects.isEmpty else { return 0 }
 
         var count = 0
 
@@ -1204,109 +1200,17 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         isMultiSelectEnabled = true
     }
 
-    // MARK: - External Bookmarks Action Bar
-
-    func updateBookmarksActionBar(state: ExternalActionBarState, viewModel: BookmarkPodcastListViewModel) {
-        if state.isMultiSelecting {
-            // Ensure top nav/selection header matches multiselect state
-            if !isMultiSelectEnabled {
-                isMultiSelectEnabled = true
-            }
-            // Hide the table's native multiSelectFooter; we present a SwiftUI bar instead
-            multiSelectFooter.isHidden = true
-
-            let actions: [ActionBarView<ThemedActionBarStyle>.Action] = makeBookmarkActions(BookmarkActionConfig(
-                showShare: state.showShare,
-                showEdit: state.showEdit,
-                onShare: { viewModel.shareSelectedBookmarks() },
-                onEdit: { viewModel.editSelectedBookmarks() },
-                onDelete: { viewModel.deleteSelectedBookmarks() }
-            ))
-
-            let bar = ActionBarView(title: state.title, style: ThemedActionBarStyle(), actions: actions)
-                .padding(.bottom) // match internal spacing
-
-            if let host = bookmarksActionBarHost {
-                host.rootView = AnyView(bar)
-            } else {
-                let host = UIHostingController(rootView: AnyView(bar))
-                host.view.backgroundColor = .clear
-                bookmarksActionBarHost = host
-
-                addChild(host)
-                view.addSubview(host.view)
-                host.view.translatesAutoresizingMaskIntoConstraints = false
-
-                let bottom = host.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
-                bookmarksActionBarBottomConstraint = bottom
-
-                NSLayoutConstraint.activate([
-                    host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                    host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                    bottom
-                ])
-
-                host.didMove(toParent: self)
-
-                // Ensure initial layout has the correct offset without animating from the top
-                updateBookmarksActionBarBottomConstraint(animated: false)
-            }
-
-            if state.visible {
-                // Subsequent updates can animate
-                updateBookmarksActionBarBottomConstraint(animated: true)
-            } else {
-                // If not visible (no selected items), remove bar if present
-                removeBookmarksActionBar()
-            }
-            // Keep Select All button title in sync
-            updateSelectAllBtn()
-        } else {
-            removeBookmarksActionBar()
-            if isMultiSelectEnabled {
-                isMultiSelectEnabled = false
-            }
-        }
-    }
-
-    private func updateBookmarksActionBarBottomConstraint(animated: Bool = true) {
-        guard let bottom = bookmarksActionBarBottomConstraint else { return }
-        guard let host = bookmarksActionBarHost else { return }
-        bottom.constant = -bookmarksActionBarBottomOffset()
-        if animated {
-            UIView.animate(withDuration: 0.1) { host.view.layoutIfNeeded(); self.view.layoutIfNeeded() }
-        } else {
-            host.view.layoutIfNeeded()
-            self.view.layoutIfNeeded()
-        }
-    }
-
-    func removeBookmarksActionBar() {
-        if let host = bookmarksActionBarHost {
-            host.willMove(toParent: nil)
-            host.view.removeFromSuperview()
-            host.removeFromParent()
-        }
-        bookmarksActionBarHost = nil
-        bookmarksActionBarBottomConstraint = nil
-    }
-
-    private func bookmarksActionBarBottomOffset() -> CGFloat {
-        let miniPlayerOffset = PlaybackManager.shared.currentEpisode() == nil ? 0 : Constants.Values.miniPlayerOffset
-        return miniPlayerOffset
-    }
-
     private func showPodcastFolderMoveOptions(currentFolderUuid: String) {
-        guard let podcast = podcast, let folder = DataManager.sharedManager.findFolder(uuid: currentFolderUuid) else { return }
+        guard let podcast, let folder = DataManager.shared.findFolder(uuid: currentFolderUuid) else { return }
 
         let optionsPicker = OptionsPicker(title: folder.name.localizedUppercase)
         let removeAction = OptionAction(label: L10n.folderRemoveFrom.localizedCapitalized, icon: "folder-remove") {
             podcast.sortOrder = ServerPodcastManager.shared.highestSortOrderForHomeGrid() + 1
             podcast.folderUuid = nil
             podcast.syncStatus = SyncStatus.notSynced.rawValue
-            DataManager.sharedManager.save(podcast: podcast)
+            DataManager.shared.save(podcast: podcast)
 
-            DataManager.sharedManager.updateFolderSyncModified(folderUuid: currentFolderUuid, syncModified: TimeFormatter.currentUTCTimeInMillis())
+            DataManager.shared.updateFolderSyncModified(folderUuid: currentFolderUuid, syncModified: TimeFormatter.currentUTCTimeInMillis())
 
             NotificationCenter.postOnMainThread(notification: Constants.Notifications.folderChanged, object: currentFolderUuid)
 
@@ -1315,7 +1219,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         optionsPicker.addAction(action: removeAction)
 
         let changeFolderAction = OptionAction(label: L10n.folderChange.localizedCapitalized, icon: "folder-arrow") { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             self.showFolderPickerDialog()
 
@@ -1324,22 +1228,22 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         optionsPicker.addAction(action: changeFolderAction)
 
         let goToFolderAction = OptionAction(label: L10n.folderGoTo.localizedCapitalized, icon: "folder-goto") {
-            NavigationManager.sharedManager.navigateTo(NavigationManager.folderPageKey, data: [NavigationManager.folderKey: folder])
+            NavigationManager.shared.navigateTo(NavigationManager.folderPageKey, data: [NavigationManager.folderKey: folder])
             Analytics.track(.folderPodcastModalOptionTapped, properties: ["option": "go_to"])
         }
         optionsPicker.addAction(action: goToFolderAction)
 
-        optionsPicker.show(statusBarStyle: preferredStatusBarStyle)
+        optionsPicker.present(from: self)
     }
 
     private func showFolderPickerDialog() {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         let model = ChoosePodcastFolderModel(pickingFor: podcast.uuid, currentFolder: podcast.folderUuid)
         let chooseFolderView = ChoosePodcastFolderView(model: model) { [weak self] _ in
             self?.dismiss(animated: true, completion: nil)
         }
-        let hostingController = PCHostingController(rootView: chooseFolderView.environmentObject(Theme.sharedTheme))
+        let hostingController = PCHostingController(rootView: chooseFolderView.environmentObject(Theme.shared))
 
         present(hostingController, animated: true, completion: nil)
     }
@@ -1349,13 +1253,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     }
 
     func showBookmarks() {
-        if FeatureFlag.podcastBookmarksInline.enabled {
-            switchViewMode(to: .bookmarks)
-        } else {
-            guard let podcast else { return }
-            let controller = BookmarksPodcastListController(podcast: podcast)
-            present(controller, animated: true)
-        }
+        switchViewMode(to: .bookmarks)
     }
 
     func showYouMightLike() {
@@ -1366,20 +1264,25 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
 
     private func setupRefreshControl() {
         if shouldDisplayPodcastFeedReloadButton() {
-            refreshControl = CustomRefreshControl()
-            refreshControl?.customTintColor = contrastColorForPodcastImage
-            refreshControl?.perform = { [weak self] _ in
+            let controller = PodcastFeedRefreshController()
+            controller.refreshControl.customTintColor = UIColor.label
+            controller.perform = { [weak self] in
                 self?.reloadPodcastFeed(source: .refreshControl)
             }
-            episodesTable.refreshControl = refreshControl
-        }
-    }
+            episodesTable.refreshControl = controller.refreshControl
+            refreshController = controller
 
-    private var contrastColorForPodcastImage: UIColor {
-        guard let image = ImageManager.sharedManager.cachedImageFor(podcastUuid: self.podcastUUID, size: .grid) else {
-            return .white
+            // `UIImage.isDark` walks every byte of the artwork (~40 ms for grid-size art),
+            // so resolve the contrast color off the main thread and apply when ready.
+            let uuid = podcastUUID
+            Task.detached(priority: .utility) { [refreshControl = controller.refreshControl] in
+                guard let image = ImageManager.shared.cachedImageFor(podcastUuid: uuid, size: .grid) else { return }
+                let isDark = image.isDark
+                await MainActor.run {
+                    refreshControl.customTintColor = isDark ? .white : .black
+                }
+            }
         }
-        return image.isDark ? .white : .black
     }
 
     func shouldDisplayPodcastFeedReloadButton() -> Bool {
@@ -1389,7 +1292,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     func reloadPodcastFeed(source: PodcastFeedReloadSource) {
         // In case the FF is switched off
         guard shouldDisplayPodcastFeedReloadButton() else {
-            refreshControl?.endRefreshing()
+            refreshController?.refreshControl.endRefreshing()
             return
         }
         if podcastFeedViewModel?.loadingState == .loading {
@@ -1404,15 +1307,6 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
                 self?.loadPodcastInfo()
             }
         }
-    }
-
-    func refreshPodcastFeed() {
-        // In case the FF is switched off
-        guard shouldDisplayPodcastFeedReloadButton() else {
-            refreshControl?.endRefreshing()
-            return
-        }
-        reloadPodcastFeed(source: .refreshControl)
     }
 
     func open(url: URL) {
@@ -1559,10 +1453,10 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
     // MARK: - Long press actions
 
     func archiveAll(startingAt: Episode) {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         DispatchQueue.global().async { [weak self] in
-            guard let allObjects = self?.episodeInfo[safe: 1]?.elements, allObjects.count > 0 else { return }
+            guard let allObjects = self?.episodeInfo[safe: 1]?.elements, !allObjects.isEmpty else { return }
 
             var haveFoundFirst = false
             for object in allObjects {
@@ -1594,15 +1488,9 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         return true
     }
 
-    // MARK: - SyncSigninDelegate
-
-    func signingProcessCompleted() {
-        navigationController?.popToViewController(self, animated: true)
-    }
-
     @MainActor
     func loadRecommendations() async {
-        guard let podcast = podcast else { return }
+        guard let podcast else { return }
 
         isLoadingRecommendations.send(true)
         updateEmptyStateVisibility()
@@ -1639,7 +1527,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
 
     private func switchViewMode(to mode: ViewMode) {
         // Clear any externally presented action bar when switching modes
-        removeBookmarksActionBar()
+        bookmarkList?.removeActionBar()
         if isMultiSelectEnabled {
             isMultiSelectEnabled = false
         }
@@ -1647,7 +1535,7 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
         currentViewModeSubject.send(mode)
         switch mode {
         case .episodes:
-            if let podcast = podcast {
+            if let podcast {
                 loadLocalEpisodes(podcast: podcast, animated: true)
             }
         case .youMightLike:
@@ -1658,10 +1546,14 @@ class PodcastViewController: FakeNavViewController, PodcastActionsDelegate, Sync
                 }
             }
         case .bookmarks:
-            if bookmarkViewModel == nil {
-                setupBookmarkViewModel()
+            if bookmarkList == nil {
+                setupBookmarkList() // Reloads on init
+            } else {
+                bookmarkList?.viewModel.reload()
             }
-            bookmarkViewModel?.reload()
+
+            // The multi select state is kept when switching between the tabs
+            bookmarkList?.updateActionBar()
         }
         Analytics.track(.podcastsScreenTabTapped, properties: ["value": mode.analyticsValue])
         reloadData()
@@ -1703,13 +1595,12 @@ extension PodcastViewController: SFSafariViewControllerDelegate {
 // MARK: - BookmarkListRouter
 
 extension PodcastViewController: BookmarkListRouter {
-    func bookmarkPlay(_ bookmark: Bookmark) {
-        PlaybackManager.shared.playBookmark(bookmark, source: .podcasts)
+    func bookmarkPlay(_ bookmark: Bookmark) async throws {
+        try await PlaybackManager.shared.playBookmark(bookmark, source: .podcasts)
     }
 
     func bookmarkEdit(_ bookmark: Bookmark) {
-        let controller = BookmarkEditTitleViewController(manager: PlaybackManager.shared.bookmarkManager, bookmark: bookmark, state: .updating)
-        controller.source = .podcasts
+        let controller = BookmarkEditTitleViewController(manager: PlaybackManager.shared.bookmarkManager, bookmark: bookmark, state: .updating, style: .themed, source: .podcasts)
 
         present(controller, animated: true)
     }

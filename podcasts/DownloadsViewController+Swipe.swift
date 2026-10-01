@@ -2,6 +2,7 @@ import Foundation
 import PocketCastsDataModel
 import SwipeCellKit
 import PocketCastsUtils
+import UIKit
 
 extension DownloadsViewController: SwipeTableViewCellDelegate, SwipeHandler {
     // MARK: - SwipeTableViewCellDelegate
@@ -47,13 +48,9 @@ extension DownloadsViewController: SwipeTableViewCellDelegate, SwipeHandler {
     }
 
     func actionPerformed(willBeRemoved: Bool) {
-        if FeatureFlag.playlistsRebranding.enabled {
-            if willBeRemoved {
-                reloadEpisodes()
-            }
-            return
+        if willBeRemoved {
+            reloadEpisodes()
         }
-        reloadEpisodes()
     }
 
     func deleteRequested(uuid: String) {} // we don't support this one
@@ -63,7 +60,7 @@ extension DownloadsViewController: SwipeTableViewCellDelegate, SwipeHandler {
     }
 
     func addToManualPlaylist(episode: PocketCastsDataModel.Episode, at: IndexPath) {
-        NavigationManager.sharedManager.navigateTo(
+        NavigationManager.shared.navigateTo(
             NavigationManager.manualPlaylistsChooserKey,
             data: [
                 NavigationManager.manualPlaylistsChooserEpisodeKey: episode

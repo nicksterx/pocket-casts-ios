@@ -48,6 +48,8 @@ class SmallPagedListSummaryViewController: DiscoverPeekViewController, GridLayou
     private var category: DiscoverCategory?
 
     private weak var delegate: DiscoverDelegate?
+
+    var serverHandler: DiscoverServerHandling = DiscoverServerHandler.shared
     @IBOutlet var smallPagedCollectionViewHeight: NSLayoutConstraint!
     @IBOutlet var dividerHeightConstraint: NSLayoutConstraint! {
         didSet {
@@ -57,6 +59,10 @@ class SmallPagedListSummaryViewController: DiscoverPeekViewController, GridLayou
 
     override func viewDidLoad() {
         super.viewDidLoad()
+
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: SmallPagedListSummaryViewController, _) in
+            controller.updateSize()
+        }
 
         (view as? ThemeableView)?.style = .primaryUi02
 
@@ -136,7 +142,7 @@ class SmallPagedListSummaryViewController: DiscoverPeekViewController, GridLayou
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: SmallPagedListSummaryViewController.cellId, for: indexPath) as! SmallListCell
         let thisPodcast = podcasts[indexPath.row]
-        if let delegate = delegate {
+        if let delegate {
             cell.populateFrom(thisPodcast, isSubscribed: delegate.isSubscribed(podcast: thisPodcast))
             cell.onSubscribe = { [weak self] in
                 if let listId = self?.item?.uuid, let podcastUuid = thisPodcast.uuid {
@@ -149,7 +155,7 @@ class SmallPagedListSummaryViewController: DiscoverPeekViewController, GridLayou
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard let item = item else { return }
+        guard let item else { return }
 
         let podcast = podcasts[indexPath.item]
 
@@ -190,7 +196,7 @@ class SmallPagedListSummaryViewController: DiscoverPeekViewController, GridLayou
         self.category = category
         titleLabel.text = delegate?.replaceRegionName(string: title)
 
-        DiscoverServerHandler.shared.discoverPodcastList(source: source, authenticated: item.authenticated, completion: { [weak self] podcastList in
+        serverHandler.discoverPodcastList(source: source, authenticated: item.authenticated, completion: { [weak self] podcastList in
             guard let strongSelf = self, let discoverPodcast = podcastList?.podcasts else { return }
             for podcast in discoverPodcast {
                 strongSelf.podcasts.append(podcast)
@@ -243,7 +249,7 @@ class SmallPagedListSummaryViewController: DiscoverPeekViewController, GridLayou
     }
 
     @IBAction func showAllClicked(_ sender: Any) {
-        guard let delegate = delegate, let item = item else { return }
+        guard let delegate, let item else { return }
 
         delegate.showExpanded(item: item, podcasts: podcasts, podcastCollection: nil)
     }
@@ -254,12 +260,22 @@ class SmallPagedListSummaryViewController: DiscoverPeekViewController, GridLayou
         lastLayedOutWidth = 0
         smallPagedCollectionViewHeight.constant = (cellHeight + cellSpacing) * CGFloat(numberOfRows)
     }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-
-        if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
-            updateSize()
-        }
-    }
 }
+
+#if DEBUG
+
+import SwiftUI
+
+#Preview("Small paged list") {
+    let section = SmallPagedListSummaryViewController()
+    section.serverHandler = PreviewDiscoverServerHandler(
+        podcastList: DiscoverPreviewData.podcastList(title: "Popular", podcasts: DiscoverPreviewData.podcasts(20))
+    )
+    return DiscoverSectionPreview(
+        section: section,
+        item: DiscoverPreviewData.item(.smallPagedListSummary, title: "Popular in [regionname]"),
+        delegate: PreviewDiscoverDelegate(subscribedUUIDs: [DiscoverPreviewData.podcast(at: 1).uuid ?? ""])
+    )
+}
+
+#endif

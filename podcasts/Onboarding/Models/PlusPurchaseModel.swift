@@ -43,7 +43,9 @@ class PlusPurchaseModel: PlusPricingInfoModel, OnboardingModel {
     // MARK: - Triggers the purchase process
     func purchase(product: IAPProductID) {
         guard purchaseHandler.canMakePurchases else {
-            showPurchaseDisabledAlert(product: product)
+            DispatchQueue.main.async {
+                self.showPurchaseDisabledAlert(product: product)
+            }
             return
         }
 
@@ -56,6 +58,7 @@ class PlusPurchaseModel: PlusPricingInfoModel, OnboardingModel {
         state = .purchasing
     }
 
+    @MainActor
     func showPurchaseDisabledAlert(product: IAPProductID) {
         guard let presentingViewController = parentController ?? SceneHelper.rootViewController() else {
             return
@@ -87,11 +90,7 @@ class PlusPurchaseModel: PlusPricingInfoModel, OnboardingModel {
         if SubscriptionHelper.activeTier == .patron {
             controller = PatronWelcomeViewModel.make(in: navigationController)
         } else {
-            if !FeatureFlag.newOnboardingAccountCreation.enabled {
-                controller = WelcomeViewModel.make(in: navigationController, displayType: .plus)
-            } else {
-                controller = nil
-            }
+            controller = nil
         }
 
         let presentNextBlock: () -> Void = {
@@ -108,7 +107,6 @@ class PlusPurchaseModel: PlusPricingInfoModel, OnboardingModel {
 
             // Reset the nav flow to only show the welcome controller
             navigationController.setViewControllers([controller], animated: true)
-
         }
 
         // Dismiss the current flow
@@ -234,21 +232,12 @@ private extension PlusPurchaseModel {
     func handlePurchaseCancelled(_ notification: Notification) {
         defer { state = .cancelled }
         guard
-            let purchasedProduct,
-            let error = notification.userInfo?["error"] as? NSError
+            purchasedProduct != nil,
+            notification.userInfo?["error"] as? NSError != nil
         else { return }
     }
 
     func handlePurchaseFailed(error: NSError?) {
         state = .failed
-    }
-
-    private var defaultError: NSError {
-        let userInfo = [
-            NSLocalizedDescriptionKey: "Failed to initiate purchase.",
-            NSLocalizedFailureReasonErrorKey: "Failed because the product isn't available, or the user isn't signed in"
-        ]
-
-        return NSError(domain: "com.pocketcasts.iap", code: 1, userInfo: userInfo)
     }
 }

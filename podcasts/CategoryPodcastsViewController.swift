@@ -20,6 +20,8 @@ class CategoryPodcastsViewController: PCViewController, UITableViewDelegate, UIT
 
     weak var delegate: DiscoverDelegate?
 
+    var serverHandler: DiscoverServerHandling = DiscoverServerHandler.shared
+
     fileprivate var item: DiscoverItem?
 
     fileprivate var category: DiscoverCategory? {
@@ -61,11 +63,11 @@ class CategoryPodcastsViewController: PCViewController, UITableViewDelegate, UIT
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         var podcastIndexRow = indexPath.row
-        if showPromotion(), let promotion = promotion {
+        if showPromotion(), let promotion {
             if indexPath.row == CategoryPodcastsViewController.promotionRow {
                 let cell = tableView.dequeueReusableCell(withIdentifier: CategoryPodcastsViewController.sponsoredCellId, for: indexPath) as! CategorySponsoredCell
                 var isSubscribed = false
-                if let delegate = delegate {
+                if let delegate {
                     var discoverPodcast = DiscoverPodcast()
                     discoverPodcast.uuid = promotion.podcast_uuid
                     isSubscribed = delegate.isSubscribed(podcast: discoverPodcast)
@@ -73,7 +75,7 @@ class CategoryPodcastsViewController: PCViewController, UITableViewDelegate, UIT
                 cell.populateFrom(promotion, isSubscribed: isSubscribed)
                 return cell
             } else {
-                podcastIndexRow += 1
+                podcastIndexRow -= 1
             }
         }
 
@@ -87,23 +89,24 @@ class CategoryPodcastsViewController: PCViewController, UITableViewDelegate, UIT
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard let delegate = delegate else { return }
+        guard let delegate else { return }
 
         if let cell = tableView.cellForRow(at: indexPath) as? DiscoverPodcastTableCell {
-            let podcast = podcasts[indexPath.row]
+            let podcastIndexRow = showPromotion() ? indexPath.row - 1 : indexPath.row
+            let podcast = podcasts[podcastIndexRow]
 
             let categoryName = category?.name ?? "unknown"
             let listUuid = "category-\(categoryName.lowercased())-\(region ?? "unknown")"
 
             delegate.show(discoverPodcast: podcast, placeholderImage: cell.podcastImage.image, isFeatured: false, listUuid: listUuid)
-        } else if let cell = tableView.cellForRow(at: indexPath) as? CategorySponsoredCell, let promotion = promotion {
+        } else if let cell = tableView.cellForRow(at: indexPath) as? CategorySponsoredCell, let promotion {
             var podcastInfo = PodcastInfo()
             podcastInfo.title = promotion.title
             podcastInfo.uuid = promotion.podcast_uuid
             let listId = promotion.promotion_uuid
             delegate.show(podcastInfo: podcastInfo, placeholderImage: cell.podcastImage.image, isFeatured: false, listUuid: listId)
 
-            if let listId = listId, let uuid = podcastInfo.uuid {
+            if let listId, let uuid = podcastInfo.uuid {
                 AnalyticsHelper.podcastTappedFromList(listId: listId, podcastUuid: uuid)
             }
         }
@@ -123,13 +126,13 @@ class CategoryPodcastsViewController: PCViewController, UITableViewDelegate, UIT
     // MARK: - Loading
 
     private func loadPodcasts() {
-        guard let delegate = delegate, let category, let source = delegate.replaceRegionCode(string: category.source) else { return }
-        if loadingIndicator.isAnimating || podcasts.count > 0 { return }
+        guard let delegate, let category, let source = delegate.replaceRegionCode(string: category.source) else { return }
+        if loadingIndicator.isAnimating || !podcasts.isEmpty { return }
 
         noNetworkView.isHidden = true
         loadingIndicator.startAnimating()
 
-        DiscoverServerHandler.shared.discoverCategoryDetails(source: source, authenticated: nil, completion: { [weak self] categoryDetails in
+        serverHandler.discoverCategoryDetails(source: source, authenticated: nil, completion: { [weak self] categoryDetails in
             DispatchQueue.main.async {
                 guard let strongSelf = self, let podcasts = categoryDetails?.podcasts else {
                     return
@@ -192,3 +195,39 @@ extension CategoryPodcastsViewController: DiscoverSummaryProtocol {
         loadPodcasts()
     }
 }
+
+#if DEBUG
+
+import SwiftUI
+
+#Preview("Category podcasts") {
+    let section = CategoryPodcastsViewController(region: "us")
+    section.serverHandler = PreviewDiscoverServerHandler(
+        categoryDetails: DiscoverPreviewData.categoryDetails(title: "Technology", podcasts: DiscoverPreviewData.podcasts(12))
+    )
+    return DiscoverSectionPreview(
+        section: section,
+        item: DiscoverPreviewData.item(.categoryPodcasts, title: "Technology"),
+        category: DiscoverPreviewData.categories()[11],
+        height: 700
+    )
+}
+
+#Preview("Category podcasts · promoted") {
+    let section = CategoryPodcastsViewController(region: "us")
+    section.serverHandler = PreviewDiscoverServerHandler(
+        categoryDetails: DiscoverPreviewData.categoryDetails(
+            title: "Technology",
+            podcasts: DiscoverPreviewData.podcasts(12),
+            promotion: (title: "Hard Fork", description: "Two friends try to make sense of the week in tech.")
+        )
+    )
+    return DiscoverSectionPreview(
+        section: section,
+        item: DiscoverPreviewData.item(.categoryPodcasts, title: "Technology"),
+        category: DiscoverPreviewData.categories()[11],
+        height: 700
+    )
+}
+
+#endif

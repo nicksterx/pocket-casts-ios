@@ -36,7 +36,7 @@ class EpisodeRowViewModel: EpisodeViewModel, Identifiable {
         var accessibilityLabel = [episode.title ?? ""]
 
         if let publishedDate = episode.publishedDate {
-            let info = DateFormatHelper.sharedHelper.shortLocalizedFormat(publishedDate)
+            let info = DateFormatHelper.shared.shortLocalizedFormat(publishedDate)
             informationLabel.append(info)
             accessibilityLabel.append(info)
         }
@@ -69,7 +69,7 @@ class EpisodeRowViewModel: EpisodeViewModel, Identifiable {
         informationLabel.append(info)
         accessibilityLabel.append(info)
 
-        if let statusText = statusText {
+        if let statusText {
             accessibilityLabel.append(statusText)
         }
 

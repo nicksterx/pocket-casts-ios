@@ -4,8 +4,8 @@ import PocketCastsServer
 import PocketCastsUtils
 
 struct Announcements {
-    private static let bookmarksViewModel = BookmarkAnnouncementViewModel()
     private static let chaptersViewModel = DeselectChaptersAnnouncementViewModel()
+    private static let transcriptsViewModel = TranscriptAnnouncementViewModel()
 
     // Order is important.
     // In the case a user migrates to, let's say, 7.10 to 7.15 and
@@ -21,7 +21,7 @@ struct Announcements {
             action: {
                 AnnouncementFlow.current = .autoPlay
 
-                NavigationManager.sharedManager.navigateTo(NavigationManager.settingsProfileKey, data: nil)
+                NavigationManager.shared.navigateTo(NavigationManager.settingsProfileKey, data: nil)
             },
             isEnabled: true
         ),
@@ -115,8 +115,22 @@ struct Announcements {
             action: {
                 SceneHelper.rootViewController()?.dismiss(animated: true)
             },
-            isEnabled: FeatureFlag.upNextShuffle.enabled,
+            isEnabled: true,
             fullModal: true
+        ),
+        .init(
+            version: "8.14",
+            header: AnyView(Image("whatsnew-highlighted-transcripts")),
+            title: L10n.transcriptHighlightAnnouncementTitle,
+            message: L10n.transcriptHighlightAnnouncementMessage,
+            buttonTitle: transcriptsViewModel.buttonTitle,
+            action: {
+                transcriptsViewModel.buttonAction()
+            },
+            displayTier: transcriptsViewModel.displayTier,
+            isEnabled: FeatureFlag.syncedTranscripts.enabled,
+            fullModal: true,
+            footnote: L10n.transcriptHighlightAnnouncementFootnote
         )
     ]
 }

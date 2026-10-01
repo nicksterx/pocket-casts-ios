@@ -2,10 +2,12 @@ import PocketCastsDataModel
 import PocketCastsServer
 import PocketCastsUtils
 import SafariServices
+import SJUtils
 import UIKit
 import WebKit
 
-class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewControllerDelegate, WKNavigationDelegate {
+@MainActor
+class ShowNotesPlayerItemViewController: PlayerItemViewController, @preconcurrency SFSafariViewControllerDelegate, WKNavigationDelegate {
     @IBOutlet var episodeTitle: UILabel! {
         didSet {
             episodeTitle.font = UIFont.font(ofSize: 22, weight: .bold, scalingWith: .title2)
@@ -40,7 +42,6 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
 
     private var downloadingShowNotes = false
     private var lastEpisodeUuidRendered = ""
-    private var docController: UIDocumentInteractionController?
 
     private var showNotesWebView: WKWebView!
     private var safariViewController: SFSafariViewController?
@@ -59,6 +60,10 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
 
     override func viewDidLoad() {
         super.viewDidLoad()
+
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: ShowNotesPlayerItemViewController, _) in
+            controller.updateSize()
+        }
 
         setupWebView()
         updateColors()
@@ -82,10 +87,6 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
         showNotesWebView.isOpaque = false
         showNotesWebView.backgroundColor = UIColor.clear
         showNotesWebView.scrollView.backgroundColor = UIColor.clear
-    }
-
-    deinit {
-        showNotesWebView?.navigationDelegate = nil
     }
 
     override func willBeAddedToPlayer() {
@@ -116,9 +117,9 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
     }
 
     @objc private func updateShowNotes() {
-        guard let episode = PlaybackManager.shared.currentEpisode() as? Episode else { return }
+        guard let episode = PlaybackManager.shared.currentEpisode as? Episode else { return }
         self.episode = episode
-        let pubDate = DateFormatHelper.sharedHelper.longLocalizedFormat(episode.publishedDate)
+        let pubDate = DateFormatHelper.shared.longLocalizedFormat(episode.publishedDate)
         publishedDate.text = pubDate
         duration.text = TimeFormatter.shared.minutesFormatted(time: episode.duration)
 
@@ -146,7 +147,7 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
     private func loadShowNotes() {
         if downloadingShowNotes { return }
 
-        guard let episode = episode else { return }
+        guard let episode else { return }
 
         loadingIndicator.startAnimating()
 
@@ -154,7 +155,7 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
             if let showNotes = try? await ShowInfoCoordinator.shared.loadShowNotes(podcastUuid: episode.parentIdentifier(), episodeUuid: episode.uuid) {
                 self?.downloadingShowNotes = false
 
-                let shouldResetScrollOffset = lastEpisodeUuidRendered != episode.uuid && lastEpisodeUuidRendered != ""
+                let shouldResetScrollOffset = lastEpisodeUuidRendered != episode.uuid && !lastEpisodeUuidRendered.isEmpty
                 self?.displayShowNotes(showNotes, shouldResetScrollOffset: shouldResetScrollOffset)
 
                 // if we get back the no show notes available message, make sure next update we try again
@@ -170,15 +171,15 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
     }
 
     private func displayShowNotes(_ showNotes: String?, shouldResetScrollOffset: Bool = true) {
-        guard let episode = episode else { return }
+        guard let episode else { return }
 
         DispatchQueue.main.async { [weak self] in
             guard let strongSelf = self else { return }
 
             strongSelf.loadingIndicator.stopAnimating()
             let tintColor = strongSelf.linkTintColor()
-            if let showNotes = showNotes {
-                let isCurrentEpisode = PlaybackManager.shared.isNowPlayingEpisode(episodeUuid: episode.uuid)
+            if let showNotes {
+                let isCurrentEpisode = PlaybackManager.shared.isCurrentEpisode(uuid: episode.uuid)
                 let formattedNotes = ShowNotesFormatter.format(showNotes: showNotes, tintColor: tintColor, convertTimesToLinks: isCurrentEpisode, bgColor: nil, textColor: ThemeColor.playerContrast01())
                 strongSelf.showNotesWebView.loadHTMLString(formattedNotes, baseURL: URL(fileURLWithPath: Bundle.main.bundlePath))
                 // We need to ensure that the scroll view offset is back at 0,0 to cater for instances
@@ -239,7 +240,7 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         showNotesWebView.evaluateJavaScript("document.readyState", completionHandler: { [weak self] complete, _ in
-            guard let self = self,
+            guard let self,
                   let result = complete as? String,
                   result == "complete" // ensure that the load of HTML is complete and not in another loading state
             else {
@@ -270,12 +271,5 @@ class ShowNotesPlayerItemViewController: PlayerItemViewController, SFSafariViewC
         let size = max(metric.scaledValue(for: 24), 24)
         durationImageView.updateSizeConstraints(to: size)
         dateImageView.updateSizeConstraints(to: size)
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        if traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory {
-            updateSize()
-        }
     }
 }

@@ -22,6 +22,7 @@ class UpNextNowPlayingCell: ThemeableCell {
         didSet {
             dateLabel.style = .primaryText02
             dateLabel.font = UIFont.font(ofSize: 12, weight: .semibold, scalingWith: .caption1)
+            dateLabel.adjustsFontForContentSizeCategory = true
         }
     }
 
@@ -35,14 +36,16 @@ class UpNextNowPlayingCell: ThemeableCell {
     @IBOutlet var timeRemainingLabel: ThemeableLabel! {
         didSet {
             timeRemainingLabel.style = .primaryText02
-            timeRemainingLabel.font = UIFont.font(ofSize: 13, weight: .semibold, scalingWith: .footnote)
+            timeRemainingLabel.font = UIFont.font(ofSize: 13, scalingWith: .footnote)
+            timeRemainingLabel.adjustsFontForContentSizeCategory = true
         }
     }
 
     @IBOutlet var episodeTitle: ThemeableLabel! {
         didSet {
             episodeTitle.style = .primaryText01
-            episodeTitle.font = UIFont.font(ofSize: 14, weight: .medium, scalingWith: .callout)
+            episodeTitle.font = UIFont.font(ofSize: 15, weight: .medium, scalingWith: .subheadline)
+            episodeTitle.adjustsFontForContentSizeCategory = true
         }
     }
 
@@ -57,6 +60,10 @@ class UpNextNowPlayingCell: ThemeableCell {
     override func awakeFromNib() {
         super.awakeFromNib()
         style = .primaryUi04
+
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: UpNextNowPlayingCell, _) in
+            view.updateSize()
+        }
 
         NotificationCenter.default.addObserver(self, selector: #selector(progressUpdated), name: Constants.Notifications.playbackProgress, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(updatePlayingAnimation), name: Constants.Notifications.playbackPaused, object: nil)
@@ -73,7 +80,7 @@ class UpNextNowPlayingCell: ThemeableCell {
     }
 
     func populateFrom(episode: BaseEpisode) {
-        self.episode = DataManager.sharedManager.findBaseEpisode(uuid: episode.uuid) // this is a bit hacky, but we're likely to be passed the cached version here from the player, so reload it from the database to get the latest version with the correct download stats
+        self.episode = DataManager.shared.findBaseEpisode(uuid: episode.uuid) // this is a bit hacky, but we're likely to be passed the cached version here from the player, so reload it from the database to get the latest version with the correct download stats
 
         episodeTitle.text = episode.displayableTitle()
 
@@ -98,7 +105,7 @@ class UpNextNowPlayingCell: ThemeableCell {
         let duration: Double
         let currentTime: TimeInterval
 
-        if let episode = episode {
+        if let episode {
             duration = episode.duration
             currentTime = PlaybackManager.shared.currentTime()
         }
@@ -115,7 +122,7 @@ class UpNextNowPlayingCell: ThemeableCell {
         let percentageLapsed = CGFloat(currentTime / duration)
         progressViewWidthConstraint.constant = percentageLapsed * roundedBackgroundView.frame.width
 
-        playingAnimationView.animating = PlaybackManager.shared.playing()
+        playingAnimationView.animating = PlaybackManager.shared.isPlaying
 
         updateDownloadStatus()
 
@@ -127,7 +134,7 @@ class UpNextNowPlayingCell: ThemeableCell {
     }
 
     @objc func updatePlayingAnimation() {
-        playingAnimationView.animating = PlaybackManager.shared.playing()
+        playingAnimationView.animating = PlaybackManager.shared.isPlaying
     }
 
     override func prepareForReuse() {
@@ -138,7 +145,7 @@ class UpNextNowPlayingCell: ThemeableCell {
     override func handleThemeDidChange() {
         super.handleThemeDidChange()
 
-        let activeTheme = themeOverride ?? Theme.sharedTheme.activeTheme
+        let activeTheme = themeOverride ?? Theme.shared.activeTheme
 
         // Rounded background
         if activeTheme.isDark {
@@ -178,7 +185,7 @@ class UpNextNowPlayingCell: ThemeableCell {
         defer {
             setNeedsUpdateConstraints()
         }
-        guard let episode = episode else {
+        guard let episode else {
             downloadingIndicator.isHidden = true
             downloadedIndicator.isHidden = true
             return
@@ -211,10 +218,10 @@ class UpNextNowPlayingCell: ThemeableCell {
     }
 
     @objc private func updateCellForDownloadProgressChange() {
-        guard let ourEpisode = episode, let _ = DownloadManager.shared.progressManager.progressForEpisode(ourEpisode.uuid) else { return }
+        guard let ourEpisode = episode, let _ = DownloadManager.shared.progressManager.progress(forEpisodeUuid: ourEpisode.uuid) else { return }
 
         if !ourEpisode.downloading() {
-            episode = DataManager.sharedManager.findBaseEpisode(uuid: ourEpisode.uuid)
+            episode = DataManager.shared.findBaseEpisode(uuid: ourEpisode.uuid)
         }
 
         updateDownloadStatus()
@@ -225,7 +232,7 @@ class UpNextNowPlayingCell: ThemeableCell {
         guard let ourEpisode = episode, let uuid = notification.object as? String, ourEpisode.uuid == uuid else { return }
 
         // if it is, reload our episode so we get the latest status for it
-        episode = DataManager.sharedManager.findBaseEpisode(uuid: ourEpisode.uuid)
+        episode = DataManager.shared.findBaseEpisode(uuid: ourEpisode.uuid)
 
         updateDownloadStatus()
     }
@@ -251,11 +258,5 @@ class UpNextNowPlayingCell: ThemeableCell {
 
         episodeTitle.updateNumberOfLines(regular: 1, accessibility: 3)
         dateLabel.updateNumberOfLines(regular: 1, accessibility: 2)
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory else { return }
-        updateSize()
     }
 }

@@ -43,7 +43,7 @@ class MotionManager: ObservableObject {
         self.motionManager.stopDeviceMotionUpdates()
 
         self.motionManager.deviceMotionUpdateInterval = Config.updateInterval
-        self.motionManager.startDeviceMotionUpdates(to: .main) { (data, error) in
+        self.motionManager.startDeviceMotionUpdates(to: .main) { data, _ in
             guard let data else { return }
 
             self.update(data)
@@ -80,15 +80,6 @@ class MotionManager: ObservableObject {
         }
 
         self.objectWillChange.send()
-    }
-
-    private func adjustValueForUpsideDown(_ value: Double, gravityZ: Double) -> Double {
-        // Gravity Z will be less than 0 when the device is near upside down
-        guard gravityZ > 0 else {
-            return value
-        }
-
-        return value > 0 ? .pi - value : -(.pi + value)
     }
 
     struct MotionOptions: OptionSet {

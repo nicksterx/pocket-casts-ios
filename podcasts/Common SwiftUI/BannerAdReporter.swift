@@ -34,6 +34,7 @@ struct BannerAdReporter {
     }
 
     /// Shows the ad reporting bottom sheet with options to report various problems with an ad
+    @MainActor
     static func show(for adID: String, from source: String) {
         func handle(action: ReportActionType) {
             AnalyticsHelper.bannerReport(adID: adID, reason: action.analyticsValue, location: source)
@@ -43,22 +44,22 @@ struct BannerAdReporter {
         let reportOptions = OptionsPicker(title: nil)
 
         let removeAction = OptionAction(label: L10n.bannerAdsRemoveAds, icon: "unsubscribe") {
-            NavigationManager.sharedManager.showUpsellView(from: SceneHelper.rootViewController()!, source: .bannerAd)
+            NavigationManager.shared.showUpsellView(from: SceneHelper.rootViewController()!, source: .bannerAd)
         }
         reportOptions.addAction(action: removeAction)
 
-        let reportPicker = OptionsPicker(title: L10n.bannerAdsReportAdTitle)
-        for action in ReportActionType.allCases {
-            reportPicker.addAction(action: OptionAction(label: action.label) {
-                handle(action: action)
-            })
-        }
-
-        let reportAction = OptionAction(label: L10n.bannerAdsReportAd, icon: "show_notes") {
-            reportPicker.show()
+        let reportAction = OptionAction(label: L10n.bannerAdsReportAd, icon: "show_notes", action: {})
+        reportAction.submenu = {
+            let reportPicker = OptionsPicker(title: L10n.bannerAdsReportAdTitle)
+            for action in ReportActionType.allCases {
+                reportPicker.addAction(action: OptionAction(label: action.label) {
+                    handle(action: action)
+                })
+            }
+            return reportPicker
         }
         reportOptions.addAction(action: reportAction)
 
-        reportOptions.show()
+        reportOptions.present()
     }
 }

@@ -38,8 +38,8 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
             icon: { Image("podcastlist_smallgrid").renderingMode(.template) },
             actions: [
                 .init(title: L10n.podcastGridDiscoverPodcasts, action: {
-                    Analytics.shared.track(.podcastsListDiscoverButtonTapped)
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.discoverPageKey)
+                    Analytics.track(.podcastsListDiscoverButtonTapped)
+                    NavigationManager.shared.navigateTo(NavigationManager.discoverPageKey)
                 })
             ],
             style: DefaultEmptyStateStyle.defaultStyle
@@ -47,7 +47,7 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let libraryType = Settings.libraryType()
+        let libraryType = Settings.libraryType
         let item = itemAt(indexPath: indexPath)
 
         if item?.isEmpty == true {
@@ -77,8 +77,8 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         guard let item = itemAt(indexPath: indexPath) else { return }
 
-        let libraryType = Settings.libraryType()
-        let badgeType = Settings.podcastBadgeType()
+        let libraryType = Settings.libraryType
+        let badgeType = Settings.podcastBadgeType
 
         if libraryType == .list {
             if let podcast = item.podcast {
@@ -97,6 +97,14 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
                 castCell.populateFrom(folder: folder, badgeType: badgeType, libraryType: libraryType)
             }
         }
+
+        // Sync reorder-edit treatment so reused/recycled cells stay correct. Idempotent
+        // setters on the cell make in-state calls cheap, so we don't toggle off-then-on.
+        if isEditingOrder, item.isEmpty == false {
+            applyEditingTreatment(to: cell)
+        } else {
+            removeEditingTreatment(from: cell)
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -110,33 +118,16 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
 
         if let podcast = selectedItem?.podcast {
             Analytics.track(.podcastsListPodcastTapped)
-            NavigationManager.sharedManager.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcast])
+            NavigationManager.shared.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcast])
         } else if let folder = selectedItem?.folder {
             Analytics.track(.podcastsListFolderTapped)
-            NavigationManager.sharedManager.navigateTo(NavigationManager.folderPageKey, data: [NavigationManager.folderKey: folder])
+            NavigationManager.shared.navigateTo(NavigationManager.folderPageKey, data: [NavigationManager.folderKey: folder])
         }
     }
 
     // MARK: - Re-ordering
 
-    func collectionView(_ collectionView: UICollectionView, canMoveItemAt indexPath: IndexPath) -> Bool {
-        true
-    }
-
-    func collectionView(_ collectionView: UICollectionView, moveItemAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
-        guard let itemBeingMoved = gridItems[safe: sourceIndexPath.row] else { return }
-
-        if let index = gridItems.firstIndex(of: itemBeingMoved) {
-            gridItems.remove(at: index)
-            gridItems.insert(itemBeingMoved, at: destinationIndexPath.row)
-
-            Analytics.track(.podcastsListReordered)
-
-            saveSortOrder()
-        }
-    }
-
-    private func saveSortOrder() {
+    func saveSortOrder() {
         for (index, listItem) in gridItems.enumerated() {
             if let podcast = listItem.podcast {
                 podcast.sortOrder = Int32(index)
@@ -148,9 +139,9 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
         let allPodcasts = gridItems.compactMap(\.podcast)
         let allFolders = gridItems.compactMap(\.folder)
 
-        DataManager.sharedManager.saveSortOrders(podcasts: allPodcasts)
-        DataManager.sharedManager.saveSortOrders(folders: allFolders, syncModified: TimeFormatter.currentUTCTimeInMillis())
-        Settings.setHomeFolderSortOrder(order: .custom)
+        DataManager.shared.saveSortOrders(podcasts: allPodcasts)
+        DataManager.shared.saveSortOrders(folders: allFolders, syncModified: TimeFormatter.currentUTCTimeInMillis())
+        Settings.homeFolderSortOrder = .custom
     }
 
     // MARK: - Row Sizing
@@ -159,13 +150,13 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
         let item = itemAt(indexPath: indexPath)
         if item?.isEmpty == true {
             let sizingView = makeEmptyStateView()
-                .environmentObject(Theme.sharedTheme)
+                .environmentObject(Theme.shared)
 
             let hostingController = UIHostingController(rootView: sizingView)
-            let targetSize = CGSize(width: collectionView.bounds.width - 32, height: UIView.layoutFittingCompressedSize.height)
+            let targetSize = CGSize(width: collectionView.bounds.width - 32, height: .greatestFiniteMagnitude)
             let size = hostingController.sizeThatFits(in: targetSize)
 
-            return CGSize(width: collectionView.bounds.width, height: size.height)
+            return CGSize(width: collectionView.bounds.width, height: size.height + 16)
         }
         return gridHelper.collectionView(collectionView, sizeForItemAt: indexPath, itemCount: itemCount())
     }
@@ -185,7 +176,7 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
             // Remove existing subviews
             headerView.subviews.forEach { $0.removeFromSuperview() }
 
-            if let bannerAdModel = bannerAdModel {
+            if let bannerAdModel {
                 let bannerAdView = bannerAdView(bannerAdModel: bannerAdModel)
                 let hostingController = PCHostingController(rootView: bannerAdView)
                 hostingController.view.translatesAutoresizingMaskIntoConstraints = false
@@ -233,13 +224,13 @@ extension PodcastListViewController: UICollectionViewDelegate, UICollectionViewD
         let backgroundColor = (podcastsCollectionView as? ThemeableCollectionView)!.style
         let isSameColor = ThemeColor.secondaryUi01() == AppTheme.colorForStyle(backgroundColor)
 
-        let additionalPadding: CGFloat = Settings.libraryType() == .list ? 16 : 0
+        let additionalPadding: CGFloat = Settings.libraryType == .list ? 16 : 0
 
-        return BannerAdView(model: bannerAdModel, colors: .podcastList(Theme.sharedTheme))
+        return BannerAdView(model: bannerAdModel, colors: .podcastList(Theme.shared))
             .padding(.top, !isSameColor ? 16 : 0)
             .padding(.bottom, additionalPadding)
             .padding(.horizontal, additionalPadding)
-            .environmentObject(Theme.sharedTheme)
+            .environmentObject(Theme.shared)
     }
 
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, referenceSizeForHeaderInSection section: Int) -> CGSize {

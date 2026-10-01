@@ -67,14 +67,10 @@ class PlusLockedInfoView: ThemeableView {
         addSubview(contentView)
         contentView.anchorToAllSidesOf(view: self)
         updateSize()
-    }
 
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-
-        if traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory {
-            updateCloseButtonImage()
-            updateSize()
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: PlusLockedInfoView, _) in
+            view.updateCloseButtonImage()
+            view.updateSize()
         }
     }
 
@@ -97,7 +93,7 @@ class PlusLockedInfoView: ThemeableView {
 
     @IBAction func closeTapped() {
         Analytics.track(.upgradeBannerDismissed, properties: ["source": delegate?.displaySource.rawValue ?? PlusUpgradeViewSource.unknown.rawValue])
-        if let delegate = delegate {
+        if let delegate {
             delegate.closeInfoTapped()
         } else {
             contentView.isHidden = true
@@ -106,12 +102,12 @@ class PlusLockedInfoView: ThemeableView {
 
     @IBAction func learnMoreTapped(_ sender: Any) {
         guard let displayingVC = delegate?.displayingViewController else {
-            NavigationManager.sharedManager.navigateTo(NavigationManager.showPlusMarketingPageKey, data: nil)
+            NavigationManager.shared.navigateTo(NavigationManager.showPlusMarketingPageKey, data: nil)
             return
         }
 
         let source: PlusUpgradeViewSource = delegate?.displaySource ?? .unknown
-        NavigationManager.sharedManager.showUpsellView(from: displayingVC, source: source)
+        NavigationManager.shared.showUpsellView(from: displayingVC, source: source)
     }
 
     private func setInfoLabelText() {

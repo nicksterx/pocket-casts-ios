@@ -11,8 +11,8 @@ class PodcastHeartView: UIView {
     }
 
     var podcast: Podcast?
-    private var lightPodcastColor = AppTheme.podcastHeartLightGradientColor()
-    private var darkPodcastColor = AppTheme.podcastHeartDarkRedGradientColor()
+    private var lightPodcastColor = AppTheme.podcastHeartLightGradientColor
+    private var darkPodcastColor = AppTheme.podcastHeartDarkRedGradientColor
 
     private var shadowView: UIView!
     private var circleView: UIView!
@@ -23,6 +23,7 @@ class PodcastHeartView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setup()
+        setupViews()
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -37,7 +38,10 @@ class PodcastHeartView: UIView {
 
     override func awakeFromNib() {
         super.awakeFromNib()
+        setupViews()
+    }
 
+    private func setupViews() {
         backgroundColor = UIColor.clear
 
         shadowView = UIView(frame: bounds)
@@ -72,8 +76,8 @@ class PodcastHeartView: UIView {
 
     func setPodcastColor(podcast: Podcast) {
         self.podcast = podcast
-        let darkColor = ColorManager.darkThemeTintForPodcast(podcast, defaultColor: AppTheme.podcastHeartDarkRedGradientColor())
-        let lightColor = ColorManager.lightThemeTintForPodcast(podcast, defaultColor: AppTheme.podcastHeartLightRedGradientColor())
+        let darkColor = ColorManager.darkThemeTint(for: podcast, defaultColor: AppTheme.podcastHeartDarkRedGradientColor)
+        let lightColor = ColorManager.lightThemeTint(for: podcast, defaultColor: AppTheme.podcastHeartLightRedGradientColor)
         setGradientColors(light:
             lightColor, dark: darkColor)
     }
@@ -87,8 +91,8 @@ class PodcastHeartView: UIView {
     private func updateColors() {
         greyGradientLayer.removeFromSuperlayer()
         colorGradientLayer.removeFromSuperlayer()
-        let darkGreyColor = AppTheme.podcastHeartDarkGradientColor()
-        let lightGreyColor = AppTheme.podcastHeartLightGradientColor()
+        let darkGreyColor = AppTheme.podcastHeartDarkGradientColor
+        let lightGreyColor = AppTheme.podcastHeartLightGradientColor
 
         greyGradientLayer.colors = [darkGreyColor.cgColor, lightGreyColor.cgColor]
         greyGradientLayer.locations = [0, 1.0]

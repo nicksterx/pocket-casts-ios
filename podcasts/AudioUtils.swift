@@ -4,7 +4,6 @@ import Accelerate
 import PocketCastsUtils
 
 class AudioUtils {
-    private static let bufferLength = UInt32(Constants.Audio.defaultFrameSize)
     private static let bufferByteSize = Float32(MemoryLayout<Float32>.size)
 
     class func fadeAudio(_ audio: BufferedAudio, fadeOut: Bool, channelCount: UInt32) {
@@ -23,7 +22,7 @@ class AudioUtils {
     }
 
     class func performFade(_ fadeOut: Bool, length: vDSP_Length, data: UnsafeMutablePointer<Float32>?) {
-        guard let data = data else { return }
+        guard let data else { return }
 
         var ramp = [Float32](repeating: 0, count: Int(length))
 

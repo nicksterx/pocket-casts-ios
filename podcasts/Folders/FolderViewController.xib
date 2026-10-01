@@ -20,7 +20,7 @@
             <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
             <subviews>
-                <collectionView clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" dataMode="none" translatesAutoresizingMaskIntoConstraints="NO" id="47A-43-GRI" customClass="ThemeableCollectionView" customModule="podcasts" customModuleProvider="target">
+                <collectionView clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" alwaysBounceVertical="YES" dataMode="none" translatesAutoresizingMaskIntoConstraints="NO" id="47A-43-GRI" customClass="ThemeableCollectionView" customModule="podcasts" customModuleProvider="target">
                     <rect key="frame" x="0.0" y="48" width="414" height="814"/>
                     <color key="backgroundColor" systemColor="systemBackgroundColor"/>
                     <collectionViewFlowLayout key="collectionViewLayout" minimumLineSpacing="10" minimumInteritemSpacing="10" id="SKr-CT-xsa" customClass="ReorderableFlowLayout" customModule="podcasts" customModuleProvider="target">
@@ -40,8 +40,8 @@
             <constraints>
                 <constraint firstItem="47A-43-GRI" firstAttribute="leading" secondItem="fnl-2z-Ty3" secondAttribute="leading" id="3Vn-s7-RuP"/>
                 <constraint firstItem="fnl-2z-Ty3" firstAttribute="trailing" secondItem="47A-43-GRI" secondAttribute="trailing" id="QQL-a4-Mvq"/>
-                <constraint firstItem="fnl-2z-Ty3" firstAttribute="bottom" secondItem="47A-43-GRI" secondAttribute="bottom" id="ZO9-S6-sVk"/>
-                <constraint firstItem="47A-43-GRI" firstAttribute="top" secondItem="fnl-2z-Ty3" secondAttribute="top" id="pDg-Yl-YRq"/>
+                <constraint firstItem="i5M-Pr-FkT" firstAttribute="bottom" secondItem="47A-43-GRI" secondAttribute="bottom" id="ZO9-S6-sVk"/>
+                <constraint firstItem="47A-43-GRI" firstAttribute="top" secondItem="i5M-Pr-FkT" secondAttribute="top" id="pDg-Yl-YRq"/>
             </constraints>
             <point key="canvasLocation" x="131.8840579710145" y="130.58035714285714"/>
         </view>

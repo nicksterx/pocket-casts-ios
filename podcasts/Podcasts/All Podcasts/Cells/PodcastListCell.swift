@@ -18,15 +18,21 @@ class PodcastListCell: ThemeableCollectionCell {
         }
     }
 
-    @IBOutlet var supporterHeart: PodcastHeartView!
     @IBOutlet var unplayedBadge: UnplayedBadge!
     @IBOutlet var unplayedHeight: NSLayoutConstraint!
+    @IBOutlet var contentStackView: UIStackView!
+
+    private var supporterHeart: PodcastHeartView?
 
     private var badgeType: BadgeType = .off
 
     required init?(coder aDecoder: NSCoder) {
         super.init(coder: aDecoder)
         isAccessibilityElement = true
+
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: PodcastListCell, _) in
+            view.updateSize()
+        }
     }
 
     func populateFrom(_ podcast: Podcast, badgeType: BadgeType) {
@@ -40,15 +46,11 @@ class PodcastListCell: ThemeableCollectionCell {
         if badgeType == .allUnplayed {
             unplayedHeight.constant = 28
 
-            unplayedBadge.layoutIfNeeded()
-
             unplayedBadge.showsNumber = true
             unplayedBadge.unplayedCount = podcast.cachedUnreadCount > 99 ? 99 : podcast.cachedUnreadCount
             unplayedBadge.isHidden = podcast.cachedUnreadCount == 0
         } else if badgeType == .latestEpisode {
             unplayedHeight.constant = 12
-
-            unplayedBadge.layoutIfNeeded()
 
             unplayedBadge.showsNumber = false
             unplayedBadge.isHidden = podcast.cachedUnreadCount == 0
@@ -58,13 +60,29 @@ class PodcastListCell: ThemeableCollectionCell {
 
         unplayedBadge.updateColors()
 
-        supporterHeart.isHidden = !podcast.isPaid
         if podcast.isPaid {
-            supporterHeart.setPodcastColor(podcast: podcast)
-            supporterHeart.isShadowHidden = true
+            let heart = supporterHeart ?? makeSupporterHeart()
+            heart.isHidden = false
+            heart.setPodcastColor(podcast: podcast)
+            heart.isShadowHidden = true
+        } else {
+            supporterHeart?.isHidden = true
         }
 
         updateSize()
+    }
+
+    private func makeSupporterHeart() -> PodcastHeartView {
+        let heart = PodcastHeartView(frame: CGRect(x: 0, y: 0, width: 28, height: 28))
+        heart.translatesAutoresizingMaskIntoConstraints = false
+        let unplayedIndex = contentStackView.arrangedSubviews.firstIndex(of: unplayedBadge) ?? contentStackView.arrangedSubviews.count
+        contentStackView.insertArrangedSubview(heart, at: unplayedIndex)
+        NSLayoutConstraint.activate([
+            heart.widthAnchor.constraint(equalToConstant: 28),
+            heart.widthAnchor.constraint(equalTo: heart.heightAnchor),
+        ])
+        supporterHeart = heart
+        return heart
     }
 
     private func updateSize() {
@@ -81,14 +99,7 @@ class PodcastListCell: ThemeableCollectionCell {
             case .off:
                 break
         }
-        unplayedBadge.layoutIfNeeded()
 
         podcastTitle.updateNumberOfLines(regular: 1, accessibility: 3)
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory else { return }
-        updateSize()
     }
 }

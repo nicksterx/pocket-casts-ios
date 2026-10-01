@@ -3,39 +3,15 @@ import UIKit
 #endif
 import Foundation
 import PocketCastsDataModel
+#if !os(watchOS) && !APPCLIP && !os(tvOS)
+import EndOfYear
+#endif
 
 extension EpisodeFilter {
-    #if !os(watchOS)
-        class func indexOf(color: UIColor) -> Int {
-            if AppTheme.playlistRedColor().isEqual(color) {
-                return 0
-            } else if AppTheme.playlistBlueColor().isEqual(color) {
-                return 1
-            } else if AppTheme.playlistGreenColor().isEqual(color) {
-                return 2
-            } else if AppTheme.playlistPurpleColor().isEqual(color) {
-                return 3
-            }
-
-            return 4
-        }
-    #endif
     func iconImage() -> UIImage? {
         guard let icon = PlaylistIcon(rawValue: customIcon) else { return nil }
 
         return EpisodeFilter.imageForPlaylistIcon(icon: icon)
-    }
-
-    func iconImageLarge() -> UIImage? {
-        guard let iconName = iconImageNameLarge() else { return nil }
-
-        return UIImage(named: iconName)
-    }
-
-    func iconImageNameLarge() -> String? {
-        guard let regularName = iconImageName() else { return nil }
-
-        return "\(regularName)_large"
     }
 
     func iconImageName() -> String? {
@@ -44,32 +20,9 @@ extension EpisodeFilter {
         return EpisodeFilter.imageName(forPlaylistIcon: icon)
     }
 
-    #if !os(watchOS)
-        func iconImageNameCarPlay() -> String {
-            guard let regularName = iconImageName() else { return "" }
-
-            var name = "car_\(regularName)"
-
-            let color = playlistColor()
-            if color == AppTheme.playlistRedColor() {
-                name += "_red"
-            } else if color == AppTheme.playlistGreenColor() {
-                name += "_green"
-            } else if color == AppTheme.playlistYellowColor() {
-                name += "_yellow"
-            } else if color == AppTheme.playlistPurpleColor() {
-                name += "_purple"
-            } else {
-                name += "_blue" // default to blue
-            }
-
-            return name
-        }
-    #endif
-
-    #if !os(watchOS) && !APPCLIP
+    #if !os(watchOS) && !APPCLIP && !os(tvOS)
     @MainActor func grid() -> UIImage {
-        let episodes = DataManager.sharedManager.playlistEpisodes(for: self)
+        let episodes = DataManager.shared.playlistEpisodes(for: self)
 
         let items = PlaylistCellViewModel.gridArtworkItems(from: episodes, limit: 4) { $0.podcastUuid }
 
@@ -81,7 +34,7 @@ extension EpisodeFilter {
 
     private func carPlayPreviewTheme() -> Theme.ThemeType {
         guard let interfaceStyle = CarPlayImageHelper.carTraitCollection?.userInterfaceStyle else {
-            return Theme.sharedTheme.activeTheme
+            return Theme.shared.activeTheme
         }
 
         switch interfaceStyle {
@@ -90,7 +43,7 @@ extension EpisodeFilter {
         case .light:
             return .light
         default:
-            return Theme.sharedTheme.activeTheme
+            return Theme.shared.activeTheme
         }
     }
     #endif
@@ -124,16 +77,6 @@ extension EpisodeFilter {
     }
 
     #if !os(watchOS)
-        func setPlaylistColor(color: UIColor) {
-            let currentIcon = Int(customIcon)
-            let currentIconRow = Int(currentIcon / EpisodeFilter.iconsPerType)
-            let newIcon = (currentIconRow * EpisodeFilter.iconsPerType) + EpisodeFilter.indexOf(color: color)
-
-            customIcon = Int32(newIcon)
-            syncStatus = SyncStatus.notSynced.rawValue
-            DataManager.sharedManager.save(playlist: self)
-        }
-
         func playlistColor() -> UIColor {
             AppTheme.colorForStyle(playlistStyle())
         }
@@ -161,7 +104,7 @@ extension EpisodeFilter {
     }
 
     func episodeUuidToAddToQueries() -> String? {
-        if let playingEpisode = PlaybackManager.shared.currentEpisode(), PlaybackManager.shared.uuidOfPlayingList == uuid {
+        if let playingEpisode = PlaybackManager.shared.currentEpisode, PlaybackManager.shared.uuidOfPlayingList == uuid {
             return playingEpisode.uuid
         }
 

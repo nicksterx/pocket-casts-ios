@@ -1,4 +1,5 @@
 import Foundation
+import PocketCastsUtils
 
 extension L10n {
     // MARK: Proper Nouns
@@ -9,7 +10,9 @@ extension L10n {
     static let pocketCastsShort = "Casts"
     static let xCom = "X"
     static let instagram = "Instagram"
+    static let bluesky = "Bluesky"
     static let socialHandle = "@pocketcasts"
+    static let blueskyHandle = "@pocketcasts.com"
     static let websiteShort = "pocketcasts.com"
 
     // MARK: Support
@@ -172,7 +175,9 @@ private final class BundleToken {
     }()
 
     static let baseBundle: Bundle = {
-        let path = Bundle.main.path(forResource: "en", ofType: "lproj")
-        return Bundle(path: path!)!
+        guard let path = Bundle.main.path(forResource: "en", ofType: "lproj"), let bundle = Bundle(path: path) else {
+            return Bundle.main
+        }
+        return bundle
     }()
 }

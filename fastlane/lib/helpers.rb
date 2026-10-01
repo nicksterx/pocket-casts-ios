@@ -1,5 +1,28 @@
 # frozen_string_literal: true
 
+TVOS_NOTE_PREFIX = '- [tvOS]'
+
+# App Store Connect maximums, plus a budget for the English source where there is a basis for one.
+# https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information/
+#
+# `gp_downloadmetadata` writes nothing for a locale whose translation is over the maximum, having already
+# deleted that locale's file. `deliver` fills the gap from `default/`, so the locale silently ships the
+# English copy in place of its translation. The budget keeps the English source short enough for
+# translations, which run longer, to fit.
+#
+# Budgets are field-specific: the description keeps a deliberate reserve, while keywords are already
+# constrained by a committed translation at the hard maximum. Subtitles and release notes use only their
+# hard maximum.
+APP_STORE_METADATA_LIMITS = {
+  'release_notes.txt' => { max_size: 4000 },
+  'subtitle.txt' => { max_size: 30 },
+  # 3400 keeps a deliberate reserve; the measured expansion alone would allow ~3950.
+  'description.txt' => { max_size: 4000, budget: 3400 },
+  # 95 is today's source length, not a reserve: `metadata/it/keywords.txt` already sits at 100 of 100,
+  # so raising this needs the Italian translation shortened in GlotPress first.
+  'keywords.txt' => { max_size: 100, budget: 95 }
+}.freeze
+
 # Use this to ensure all env vars a lane requires are set.
 #
 # The best place to call this is at the start of a lane, to fail early.
@@ -32,11 +55,54 @@ def get_required_env!(key, env_file_path: USER_ENV_FILE_PATH)
   end
 end
 
-def prompt_user_for_app_store_connect_credentials
-  require 'credentials_manager'
+# Classifies an App Store metadata file's length as `:over_max`, `:over_budget` or `:ok`.
+#
+# Stays free of `UI` so `fastlane/test/helpers_test.rb` can exercise it under bare Ruby, without fastlane loaded.
+def app_store_metadata_length_verdict(file_name, length)
+  limits = APP_STORE_METADATA_LIMITS.fetch(file_name)
+  budget = limits[:budget]
 
-  # If Fastlane cannot instantiate a user, it will ask the caller for the email.
-  # Once we have it, we can set it as `FASTLANE_USER` in the environment (which has lifecycle limited to this call) so that the next commands will already have access to it.
-  # Note: if the user is already available to `AccountManager`, setting it in the env is redundant, but Fastlane doesn't provide a way to check it so we have to do it anyway.
-  ENV['FASTLANE_USER'] = CredentialsManager::AccountManager.new.user
+  return :over_max if length > limits.fetch(:max_size)
+  return :over_budget if budget && length > budget
+
+  :ok
+end
+
+# @return [Integer] Maximum number of characters App Store Connect accepts for that metadata file
+def app_store_metadata_max_size(file_name)
+  APP_STORE_METADATA_LIMITS.fetch(file_name).fetch(:max_size)
+end
+
+# @return [Integer] Length of the msgid `PoFileGenerator` stores for this file, which is the length
+#   `gp_downloadmetadata` later measures each translation against.
+#
+# `release_notes.txt` is the odd one out: it goes through `create_whats_new_entries`, which keeps the
+# content and guarantees a trailing newline. The other files go through `create_standard_entry`, which
+# stores `content.rstrip`.
+def app_store_metadata_source_length(file_name, content)
+  return content.rstrip.length unless file_name == 'release_notes.txt'
+
+  content.end_with?("\n") ? content.length : content.length + 1
+end
+
+# Builds the iOS TestFlight changelog without tvOS-only release notes.
+def ios_testflight_changelog(release_notes)
+  filtered_notes = release_notes.each_line.reject { |line| line.start_with?(TVOS_NOTE_PREFIX) }.join.chomp
+
+  filtered_notes.empty? ? +'Minor changes.' : filtered_notes
+end
+
+# Builds the tvOS TestFlight changelog from Markdown list entries marked with `[tvOS]`.
+# The marker is stripped because it is selection metadata and should not be shown to testers.
+def tvos_testflight_changelog(release_notes)
+  filtered_notes = release_notes.each_line.filter_map do |line|
+    next unless line.start_with?(TVOS_NOTE_PREFIX)
+
+    note = line.delete_prefix(TVOS_NOTE_PREFIX).strip
+    next if note.empty?
+
+    "- #{note}"
+  end.join("\n")
+
+  filtered_notes.empty? ? +'Minor changes.' : filtered_notes
 end

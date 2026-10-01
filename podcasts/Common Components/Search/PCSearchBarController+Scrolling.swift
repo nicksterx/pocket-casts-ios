@@ -1,29 +1,29 @@
 import Foundation
+import UIKit
 
 extension PCSearchBarController {
-    func setupScrollView(_ scrollView: UIScrollView, hideSearchInitially: Bool) {
-        if !hideSearchInitially {
-            scrollView.contentInset = UIEdgeInsets(top: PCSearchBarController.defaultHeight, left: scrollView.contentInset.left, bottom: scrollView.contentInset.bottom, right: scrollView.contentInset.right)
-            scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: -PCSearchBarController.defaultHeight), animated: false)
-        }
-    }
-
     func parentScrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard let searchControllerTopConstant = searchControllerTopConstant else { return }
+        guard let heightConstraint else { return }
 
         let yPos = scrollView.contentOffset.y + (view.superview?.safeAreaInsets.top ?? 0)
 
-        let newValue: CGFloat
+        let newHeight: CGFloat
         if yPos < 0 {
-            let offset = PCSearchBarController.defaultHeight + yPos
-            newValue = min(0, -offset)
+            newHeight = min(PCSearchBarController.defaultHeight, -yPos)
         } else {
-            newValue = -PCSearchBarController.defaultHeight
+            newHeight = 0
         }
 
-        if searchControllerTopConstant.constant != newValue {
-            searchControllerTopConstant.constant = newValue
+        if heightConstraint.constant != newHeight {
+            heightConstraint.constant = newHeight
             view.layoutIfNeeded()
+            updateCollapseAppearance()
+        }
+
+        // Only sync during an active drag — leaving programmatic animations (snap-to-open
+        // below, deceleration) to settle on their own, then resync at the end.
+        if tracksContentInsetToBarHeight, scrollView.isDragging {
+            syncContentInsetToBarHeight(scrollView)
         }
     }
 
@@ -43,6 +43,23 @@ extension PCSearchBarController {
             scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: -PCSearchBarController.defaultHeight - topOffset), animated: true)
         } else if shouldAnimateUp {
             scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: -topOffset), animated: true)
+        }
+    }
+
+    func parentScrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        guard tracksContentInsetToBarHeight else { return }
+        syncContentInsetToBarHeight(scrollView)
+    }
+
+    func parentScrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard tracksContentInsetToBarHeight else { return }
+        syncContentInsetToBarHeight(scrollView)
+    }
+
+    private func syncContentInsetToBarHeight(_ scrollView: UIScrollView) {
+        guard let height = heightConstraint?.constant else { return }
+        if scrollView.contentInset.top != height {
+            scrollView.contentInset.top = height
         }
     }
 }

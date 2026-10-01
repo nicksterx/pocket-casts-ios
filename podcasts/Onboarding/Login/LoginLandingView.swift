@@ -49,47 +49,33 @@ private struct LoginLandingContent: View {
     @State var headerHeightOffset: CGFloat = 0
 
     private var title: String {
-        FeatureFlag.newOnboardingAccountCreation.enabled ? L10n.loginLandingTitle : L10n.loginTitle
+        L10n.loginLandingTitle
     }
 
     private var subtitle: String {
-        FeatureFlag.newOnboardingAccountCreation.enabled ? L10n.loginLandingSubtitle : L10n.loginSubtitle
+        L10n.loginLandingSubtitle
     }
 
     var body: some View {
         let backgroundColor = AppTheme.color(for: .primaryUi01, theme: theme)
         let headerHeight = loginHeaderHeight - headerHeightOffset
-        let topPadding = fullScreenMode ? Config.topPadding : Config.padding
 
         ZStack(alignment: .top) {
             GeometryReader { viewSizeProxy in
-                if FeatureFlag.newOnboardingAccountCreation.enabled {
-                    // Title and Subtitle
-                    VStack(spacing: 0) {
-                        VStack(spacing: 16) {
-                            LoginLabel(title.preventWidows(), for: .title)
-                            LoginLabel(subtitle.preventWidows(), for: .subtitle)
-                        }
-                        .padding(.horizontal, Config.padding)
-                        .padding(.top, coordinator.isOnboarding ? Config.topPadding : headerHeightOffset)
-
-                        LoginHeader(models: calculatedModels, topPadding: coordinator.isOnboarding ? 0 : -Config.padding)
-                            .clipped()
+                // Title and Subtitle
+                VStack(spacing: 0) {
+                    VStack(spacing: 16) {
+                        LoginLabel(title.preventWidows(), for: .title)
+                        LoginLabel(subtitle.preventWidows(), for: .subtitle)
                     }
-                } else {
-                    LoginHeader(models: calculatedModels, topPadding: topPadding)
+                    .padding(.horizontal, Config.padding)
+                    .padding(.top, coordinator.isOnboarding ? Config.topPadding : headerHeightOffset)
+
+                    LoginHeader(models: calculatedModels, topPadding: coordinator.isOnboarding ? 0 : -Config.padding)
                         .clipped()
                 }
 
                 VStack(spacing: 0) {
-                    if !FeatureFlag.newOnboardingAccountCreation.enabled {
-                        // Title and Subtitle
-                        VStack(spacing: 8) {
-                            LoginLabel(title, for: .title)
-                            LoginLabel(subtitle, for: .subtitle)
-                        }
-                        .padding(.horizontal, Config.padding)
-                    }
                     Spacer()
                     Rectangle().frame(height: 10)
                         .foregroundStyle(Color.clear)
@@ -101,7 +87,7 @@ private struct LoginLandingContent: View {
                         }
                     HStack(spacing: 0) {
                         Spacer()
-                        LoginButtons(coordinator: coordinator, shouldShowLogin: !coordinator.isOnboarding || !FeatureFlag.newOnboardingAccountCreation.enabled)
+                        LoginButtons(coordinator: coordinator, shouldShowLogin: !coordinator.isOnboarding)
                         Spacer()
                     }
                     .padding(.horizontal, Config.padding)
@@ -128,17 +114,6 @@ private struct LoginLandingContent: View {
                                 headerHeightOffset = willOverflow ? contentHeight - viewHeight : 0
                             }
                         }
-
-                        if showGradient == true, !FeatureFlag.newOnboardingAccountCreation.enabled {
-                            // Determine how much of the login header takes up of the height
-                            // Then make sure the gradient stops there so the content is covered in a solid background
-                            let headerPercentage = headerHeight / viewHeight
-
-                            LinearGradient(gradient: Gradient(stops: [
-                                Gradient.Stop(color: backgroundColor.opacity(0.0), location: 0.0),
-                                Gradient.Stop(color: backgroundColor, location: headerPercentage),
-                            ]), startPoint: .top, endPoint: .bottom)
-                        }
                     }
                 )
             }
@@ -163,17 +138,6 @@ private struct LoginLandingContent: View {
         CoverModel(size: 0.26, x: 0.6468, y: 0.1626),
     ]
 
-    // Smaller header image sizes for when there are less login options
-    private var largeHeaderModels: [CoverModel] = [
-        CoverModel(size: 0.38133333, x: -0.304, y: 0.31931669),
-        CoverModel(size: 0.24, x: 0.2154, y: 0.47700394),
-        CoverModel(size: 0.24, x: 0.127, y: 0.13396846),
-        CoverModel(size: 0.38133333, x: 0.2966, y: 0.2457293),
-        CoverModel(size: 0.24, x: 0.7135, y: 0.45729304),
-        CoverModel(size: 0.38133333, x: 1.06, y: 0.31931669),
-        CoverModel(size: 0.38133333, x: 0.7912, y: 0.18396846),
-    ]
-
     /// Return the models to use in the header and allow them to be
     /// swapped out dynamically
     var calculatedModels: [CoverModel] {
@@ -190,7 +154,6 @@ private struct LoginLandingContent: View {
     var loginHeaderHeight: Double {
         calculatedHeaderHeightSmall + (smallHeight ? Config.topPaddingSmallDevice : Config.topPadding)
     }
-
 }
 
 // MARK: - Models
@@ -354,7 +317,7 @@ private struct LoginButtons: View {
         VStack(spacing: 16) {
             SocialLoginButtons(coordinator: coordinator)
 
-            Button(FeatureFlag.newOnboardingAccountCreation.enabled ? "Sign up with email" : "Sign Up") {
+            Button(L10n.loginLandingSignUpWithEmail) {
                 coordinator.signUpTapped()
             }.buttonStyle(RoundedButtonStyle(theme: theme, maxContentSizeCategory: .accessibilityMedium))
 

@@ -80,7 +80,7 @@ class PromotionViewController: UIViewController, SyncSigninDelegate, AccountUpda
 
         (view as? ThemeableView)?.style = .primaryUi01
 
-        if let code = promoCode, code.count > 0 {
+        if let code = promoCode, !code.isEmpty {
             if SyncManager.isUserLoggedIn() {
                 redeemCode()
             } else {
@@ -234,7 +234,7 @@ class PromotionViewController: UIViewController, SyncSigninDelegate, AccountUpda
     }
 
     private func redeemCode() { // called for signed in users only
-        guard let promoCode = promoCode else {
+        guard let promoCode else {
             promoStatus = .codeInvalid
             return
         }
@@ -256,7 +256,7 @@ class PromotionViewController: UIViewController, SyncSigninDelegate, AccountUpda
     private func codeRedeemed() {
         SubscriptionHelper.setSubscriptionGiftAcknowledgement(true)
         ApiServerHandler.shared.retrieveSubscriptionStatus()
-        Settings.setPromotionFinishedAcknowledged(false)
+        Settings.promotionFinishedAcknowledged = false
         delegate?.promotionRedeemed(message: serverMessage ?? "")
 
         DispatchQueue.main.async {
@@ -289,13 +289,13 @@ class PromotionViewController: UIViewController, SyncSigninDelegate, AccountUpda
     @IBAction func upgradeToPlusTapped(_ sender: Any) {
         dismiss(animated: true) {
             guard let controller = SceneHelper.rootViewController() else { return }
-            NavigationManager.sharedManager.showUpsellView(from: controller, source: .promoCode)
+            NavigationManager.shared.showUpsellView(from: controller, source: .promoCode)
         }
     }
 
     @IBAction func signUpNoPromoTapped(_ sender: Any) {
         dismiss(animated: true) {
-            NavigationManager.sharedManager.navigateTo(NavigationManager.onboardingFlow, data: ["flow": OnboardingFlow.Flow.promoCode])
+            NavigationManager.shared.navigateTo(NavigationManager.onboardingFlow, data: ["flow": OnboardingFlow.Flow.promoCode, "source": PlusUpgradeViewSource.promoCode])
         }
     }
 

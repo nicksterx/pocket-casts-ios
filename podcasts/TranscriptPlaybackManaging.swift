@@ -1,19 +1,23 @@
+import Foundation
+
 protocol TranscriptPlaybackManaging {
     var episodeUUID: String? { get }
     var podcastUUID: String? { get }
     var parentIdentifier: String? { get }
     var isPlayingEpisode: Bool { get }
+    var canSeek: Bool { get }
 
     func currentTime() -> TimeInterval
+    func seekTo(time: TimeInterval)
 }
 
 extension PlaybackManager: TranscriptPlaybackManaging {
     var episodeUUID: String? {
-        currentEpisode()?.uuid
+        currentEpisode?.uuid
     }
 
     var parentIdentifier: String? {
-        currentEpisode()?.parentIdentifier()
+        currentEpisode?.parentIdentifier()
     }
 
     var podcastUUID: String? {
@@ -21,28 +25,44 @@ extension PlaybackManager: TranscriptPlaybackManaging {
     }
 
     var isPlayingEpisode: Bool {
-        isActivelyPlaying(episodeUuid: episodeUUID)
+        guard let episodeUUID else { return false }
+        return isActivelyPlaying(episodeUuid: episodeUUID)
+    }
+
+    var canSeek: Bool { true }
+
+    func seekTo(time: TimeInterval) {
+        seekTo(time: time, startPlaybackAfterSeek: false, seekHint: nil)
     }
 }
 
 struct TranscriptEpisodeInfoProvider: TranscriptPlaybackManaging {
-    let episodeUUID: String?
-    let podcastUUID: String?
+    private let _episodeUUID: String
 
-    var parentIdentifier: String? {
-        podcastUUID
-    }
+    var episodeUUID: String? { _episodeUUID }
+    let podcastUUID: String?
+    var parentIdentifier: String? { podcastUUID }
 
     init(episodeUUID: String, podcastUUID: String) {
-        self.episodeUUID = episodeUUID
+        self._episodeUUID = episodeUUID
         self.podcastUUID = podcastUUID
     }
 
     func currentTime() -> TimeInterval {
-        0
+        guard PlaybackManager.shared.isCurrentEpisode(uuid: _episodeUUID) else {
+            return 0
+        }
+        return PlaybackManager.shared.currentTime()
     }
 
+    func seekTo(time: TimeInterval) {
+        guard PlaybackManager.shared.isCurrentEpisode(uuid: _episodeUUID) else { return }
+        PlaybackManager.shared.seekTo(time: time)
+    }
+
+    var canSeek: Bool { PlaybackManager.shared.isCurrentEpisode(uuid: _episodeUUID) }
+
     var isPlayingEpisode: Bool {
-        PlaybackManager.shared.isActivelyPlaying(episodeUuid: episodeUUID)
+        PlaybackManager.shared.isActivelyPlaying(episodeUuid: _episodeUUID)
     }
 }

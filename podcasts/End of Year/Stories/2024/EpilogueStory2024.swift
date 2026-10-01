@@ -1,12 +1,5 @@
 import SwiftUI
-
-struct StoryShareButton: View {
-    let shareable: Bool
-
-    var body: some View {
-        EmptyView()
-    }
-}
+import EndOfYear
 
 struct EpilogueStory2024: StoryView {
 
@@ -62,7 +55,6 @@ struct EpilogueStory2024: StoryView {
             .padding(.horizontal, 24)
             .padding(.vertical, 6)
         }
-
     }
 
     func onAppear() {

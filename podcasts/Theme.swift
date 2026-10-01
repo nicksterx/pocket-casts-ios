@@ -1,8 +1,10 @@
 import Foundation
 import PocketCastsServer
 import PocketCastsUtils
+import Combine
+import UIKit
 
-extension ThemeType: AnalyticsDescribable {
+extension ThemeType {
     static var displayOrder: [ThemeType] {
         [.light, .dark, .rosé, .extraDark, .indigo, .contrastDark, .contrastLight, .electric, .classic]
     }
@@ -74,36 +76,13 @@ extension ThemeType: AnalyticsDescribable {
             return "contrastDarkThemeAbstract"
         }
     }
-
-    var analyticsDescription: String {
-        switch self {
-        case .light:
-            return"default_light"
-        case .dark:
-            return "default_dark"
-        case .extraDark:
-            return "extra_dark"
-        case .electric:
-            return "electric"
-        case .classic:
-            return "classic"
-        case .indigo:
-            return "indigo"
-        case .rosé:
-            return "rose"
-        case .contrastLight:
-            return "light_contrast"
-        case .contrastDark:
-            return "dark_contrast"
-        }
-    }
 }
 
 class Theme: ObservableObject {
     static let themeKey = "theme"
     static let preferredDarkThemeKey = "preferredDarkTheme"
     static let preferredLightThemeKey = "preferredLightTheme"
-    static let sharedTheme = Theme()
+    static let shared = Theme()
 
     typealias ThemeType = PocketCastsServer.ThemeType
 
@@ -116,9 +95,6 @@ class Theme: ObservableObject {
             }
         }
         didSet {
-            if FeatureFlag.newSettingsStorage.enabled {
-                SettingsStore.appSettings.theme = activeTheme
-            }
             UserDefaults.standard.set(activeTheme.old.rawValue, forKey: Theme.themeKey)
 
             // if the user is changing from or to the radioactive theme, we need to clear our memory cache because processing is applied to these images
@@ -129,15 +105,11 @@ class Theme: ObservableObject {
     }
 
     init() {
-        if FeatureFlag.newSettingsStorage.enabled {
-            activeTheme = SettingsStore.appSettings.theme
-        } else {
-            let savedTheme = UserDefaults.standard.integer(forKey: Theme.themeKey)
-            if savedTheme == 0 && UserDefaults.standard.object(forKey: Constants.UserDefaults.shouldFollowSystemThemeKey) == nil {
-                Settings.setShouldFollowSystemTheme(true)
-            }
-            activeTheme = ThemeType(old: ThemeType.Old(rawValue: savedTheme) ?? .light)
+        let savedTheme = UserDefaults.standard.integer(forKey: Theme.themeKey)
+        if savedTheme == 0 && UserDefaults.standard.object(forKey: Constants.UserDefaults.shouldFollowSystemThemeKey) == nil {
+            Settings.shouldFollowSystemTheme = true
         }
+        activeTheme = ThemeType(old: ThemeType.Old(rawValue: savedTheme) ?? .light)
 
         NotificationCenter.default.addObserver(self, selector: #selector(systemThemeDidChange(_:)), name: Constants.Notifications.systemThemeMayHaveChanged, object: nil)
     }
@@ -151,20 +123,16 @@ class Theme: ObservableObject {
     }
 
     @objc private func systemThemeDidChange(_ notification: Notification) {
-        if Settings.shouldFollowSystemTheme() {
+        if Settings.shouldFollowSystemTheme {
             toggleTheme()
         }
     }
 
-    class func isDarkTheme() -> Bool {
-        Theme.sharedTheme.activeTheme.isDark
+    static var isDarkTheme: Bool {
+        Theme.shared.activeTheme.isDark
     }
 
     class func preferredDarkTheme() -> ThemeType {
-        if FeatureFlag.newSettingsStorage.enabled {
-            return SettingsStore.appSettings.darkThemePreference
-        }
-
         let savedType = UserDefaults.standard.integer(forKey: preferredDarkThemeKey)
 
         guard let oldTheme = ThemeType.Old(rawValue: savedType) else { return .dark }
@@ -175,15 +143,11 @@ class Theme: ObservableObject {
     }
 
     class func setPreferredDarkTheme(_ preferredType: ThemeType, systemIsDark: Bool, userInitiated: Bool = false) {
-
-        if FeatureFlag.newSettingsStorage.enabled {
-            SettingsStore.appSettings.darkThemePreference = preferredType
-        }
         UserDefaults.standard.setValue(preferredType.old.rawValue, forKey: preferredDarkThemeKey)
 
         // change the active theme if it needs to change
-        if Settings.shouldFollowSystemTheme(), systemIsDark {
-            Theme.sharedTheme.activeTheme = preferredType
+        if Settings.shouldFollowSystemTheme, systemIsDark {
+            Theme.shared.activeTheme = preferredType
         }
 
         guard userInitiated else { return }
@@ -191,11 +155,6 @@ class Theme: ObservableObject {
     }
 
     class func preferredLightTheme() -> ThemeType {
-
-        if FeatureFlag.newSettingsStorage.enabled {
-            return SettingsStore.appSettings.lightThemePreference
-        }
-
         let savedType = UserDefaults.standard.integer(forKey: preferredLightThemeKey)
 
         guard let oldTheme = ThemeType.Old(rawValue: savedType) else { return .light }
@@ -206,20 +165,16 @@ class Theme: ObservableObject {
     }
 
     class func setPreferredLightTheme(_ preferredType: ThemeType, systemIsDark: Bool) {
-
-        if FeatureFlag.newSettingsStorage.enabled {
-            SettingsStore.appSettings.lightThemePreference = preferredType
-        }
         UserDefaults.standard.setValue(preferredType.old.rawValue, forKey: preferredLightThemeKey)
 
         // change the active theme if it needs to change
-        if Settings.shouldFollowSystemTheme() {
+        if Settings.shouldFollowSystemTheme {
             if !systemIsDark {
-                Theme.sharedTheme.activeTheme = preferredType
+                Theme.shared.activeTheme = preferredType
             }
             Settings.trackValueChanged(.settingsAppearanceLightThemeChanged, value: preferredType)
         } else {
-            Theme.sharedTheme.activeTheme = preferredType
+            Theme.shared.activeTheme = preferredType
             Settings.trackValueChanged(.settingsAppearanceThemeChanged, value: preferredType)
         }
     }
@@ -231,68 +186,11 @@ class Theme: ObservableObject {
         }
     }
 
-    func toggleDarkLightThemeAnimated(topLevelView: UIView, originView: UIView) {
-        let themeToChangeTo = toggledThemed()
-
-        changeThemeAnimated(themeToChangeTo, topLevelView: topLevelView, originView: originView)
-    }
-
-    func cycleThemeForTesting() {
-        activeTheme = ThemeType(rawValue: activeTheme.rawValue + 1) ?? ThemeType.light
-    }
-
     private func toggledThemed() -> ThemeType {
-        guard Settings.shouldFollowSystemTheme() else {
+        guard Settings.shouldFollowSystemTheme else {
             return Theme.preferredLightTheme()
         }
 
-        return UITraitCollection.current.userInterfaceStyle == .dark ? Theme.preferredDarkTheme() : Theme.preferredLightTheme()
-    }
-
-    func changeThemeAnimated(_ theme: ThemeType, topLevelView: UIView, originView: UIView) {
-        // take a before and after picture
-        let currentThemeSnapshot = topLevelView.sj_snapshot()
-        activeTheme = theme
-        let newThemeSnapshot = topLevelView.sj_snapshot(afterScreenUpdate: true)
-
-        // put before at the bottom, after on top of it
-        topLevelView.addSubview(currentThemeSnapshot)
-        topLevelView.addSubview(newThemeSnapshot)
-        currentThemeSnapshot.anchorToAllSidesOf(view: topLevelView)
-        newThemeSnapshot.anchorToAllSidesOf(view: topLevelView)
-
-        // create a path where a circle will grow out from the logo
-        let originViewFrame = newThemeSnapshot.convert(originView.frame, from: originView.superview)
-        let smallCirclePath = animationCircleOfSize(originView.bounds.size.height, originViewFrame: originViewFrame)
-        let largeCirclePath = animationCircleOfSize(topLevelView.bounds.width * 4, originViewFrame: originViewFrame)
-
-        let mask = CAShapeLayer()
-        mask.path = smallCirclePath.cgPath
-        mask.backgroundColor = UIColor.black.cgColor
-        newThemeSnapshot.layer.mask = mask
-
-        // run the animation, being a circular reveal of the new theme, on completion remove our snapshot views
-        CATransaction.begin()
-        CATransaction.setCompletionBlock {
-            currentThemeSnapshot.removeFromSuperview()
-            newThemeSnapshot.removeFromSuperview()
-        }
-
-        let pathAnimation = CABasicAnimation(keyPath: "path")
-        pathAnimation.toValue = largeCirclePath.cgPath
-        pathAnimation.duration = 0.4
-        pathAnimation.fillMode = CAMediaTimingFillMode.forwards
-        pathAnimation.isRemovedOnCompletion = false
-        pathAnimation.timingFunction = CAMediaTimingFunction(name: CAMediaTimingFunctionName.easeIn)
-        mask.add(pathAnimation, forKey: "path")
-        CATransaction.commit()
-    }
-
-    private func animationCircleOfSize(_ size: CGFloat, originViewFrame: CGRect) -> UIBezierPath {
-        let yOffset = (size / 2.0) - (originViewFrame.height / 2.0)
-        let xOffset = (size / 2.0) - (originViewFrame.width / 2.0)
-        let circleRect = CGRect(x: originViewFrame.origin.x - xOffset, y: originViewFrame.origin.y - yOffset, width: size, height: size)
-
-        return UIBezierPath(roundedRect: circleRect, cornerRadius: size / 2.0)
+        return Theme.systemIsDark ? Theme.preferredDarkTheme() : Theme.preferredLightTheme()
     }
 }

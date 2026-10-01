@@ -40,7 +40,7 @@ class SharePublishViewController: PCViewController, UICollectionViewDelegate, UI
 
     @IBOutlet var descriptionPlaceholder: UILabel! {
         didSet {
-            descriptionPlaceholder.textColor = AppTheme.placeholderTextColor()
+            descriptionPlaceholder.textColor = AppTheme.placeholderTextColor
             descriptionPlaceholder.text = L10n.podcastShareListDescription
         }
     }
@@ -118,7 +118,7 @@ class SharePublishViewController: PCViewController, UICollectionViewDelegate, UI
         let listInfo = SharingServerHandler.PodcastShareInfo(title: title, description: listDescription.text, podcasts: shareUuids)
         SharingServerHandler.shared.sharePodcastList(listInfo: listInfo) { shareUrl in
             DispatchQueue.main.async {
-                guard let shareUrl = shareUrl else {
+                guard let shareUrl else {
                     self.sharingDidFail()
 
                     return
@@ -189,7 +189,7 @@ class SharePublishViewController: PCViewController, UICollectionViewDelegate, UI
         CATransaction.begin()
         CATransaction.setCompletionBlock {
             self.animationCompleted = true
-            if !self.sharingFailed, self.sharingUrl.count > 0 {
+            if !self.sharingFailed, !self.sharingUrl.isEmpty {
                 self.sharingDidSucceed(self.sharingUrl)
             }
         }
@@ -258,7 +258,7 @@ class SharePublishViewController: PCViewController, UICollectionViewDelegate, UI
     private func transitionToShareFailed() {
         removeAllAnimatedCells()
 
-        if listDescription.text.count == 0 {
+        if listDescription.text.isEmpty {
             descriptionPlaceholder.isHidden = false
         }
         podcastCollectionView.isHidden = false
@@ -325,13 +325,13 @@ class SharePublishViewController: PCViewController, UICollectionViewDelegate, UI
     }
 
     func textViewDidChange(_ textView: UITextView) {
-        descriptionPlaceholder.isHidden = textView.text.count > 0
+        descriptionPlaceholder.isHidden = !textView.text.isEmpty
     }
 
     @IBAction func nameDidChange(_ sender: AnyObject) {
         let name = listName.text == nil ? "" : listName.text!
 
-        shareBtn.isEnabled = name.count > 0
+        shareBtn.isEnabled = !name.isEmpty
     }
 
     // MARK: - Orientation

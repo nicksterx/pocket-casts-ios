@@ -168,10 +168,10 @@ class SyncSigninViewController: PCViewController, UITextFieldDelegate {
     }
 
     @objc private func syncUpToChanged(_ notification: Notification) {
-        guard let progressAlert = progressAlert, let number = notification.object as? NSNumber else { return }
+        guard let progressAlert, let number = notification.object as? NSNumber else { return }
 
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             let upTo = number.intValue
             if self.totalPodcastsToImport > 0 {
@@ -185,7 +185,7 @@ class SyncSigninViewController: PCViewController, UITextFieldDelegate {
     }
 
     @objc private func podcastsImported() {
-        guard let progressAlert = progressAlert else { return }
+        guard let progressAlert else { return }
 
         DispatchQueue.main.async {
             progressAlert.title = L10n.syncInProgress
@@ -194,7 +194,7 @@ class SyncSigninViewController: PCViewController, UITextFieldDelegate {
 
     @objc private func syncCompleted() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             self.progressAlert?.hideAlert(false)
             self.progressAlert = nil
@@ -294,7 +294,7 @@ class SyncSigninViewController: PCViewController, UITextFieldDelegate {
 
                     self.handleSuccessfulSignIn(username, password: password, userId: userId)
                     RefreshManager.shared.refreshPodcasts(forceEvenIfRefreshedRecently: true)
-                    Settings.setPromotionFinishedAcknowledged(true)
+                    Settings.promotionFinishedAcknowledged = true
                     Settings.setLoginDetailsUpdated()
 
                     NotificationCenter.postOnMainThread(notification: .userSignedIn)
@@ -329,9 +329,8 @@ class SyncSigninViewController: PCViewController, UITextFieldDelegate {
 
         // we've signed in, set all our existing podcasts to
         // be non synced if the user never logged in before
-        if (FeatureFlag.onlyMarkPodcastsUnsyncedForNewUsers.enabled && ServerSettings.lastSyncTime == nil)
-            || !FeatureFlag.onlyMarkPodcastsUnsyncedForNewUsers.enabled {
-            DataManager.sharedManager.markAllPodcastsUnsynced()
+        if ServerSettings.lastSyncTime == nil {
+            DataManager.shared.markAllPodcastsUnsynced()
         }
 
         SyncManager.syncReason = .login

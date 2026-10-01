@@ -71,7 +71,7 @@ struct RequiredFieldStyle: TextFieldStyle {
 
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
-            .colorScheme(Theme.isDarkTheme() ? .dark : .light)
+            .colorScheme(Theme.isDarkTheme ? .dark : .light)
             .foregroundColor(ThemeColor.primaryText01(for: theme.activeTheme).color)
             .padding(6)
             .required(hasErrored)
@@ -252,25 +252,6 @@ struct BorderButton: ViewModifier {
     }
 }
 
-/// A dark button filled with a light color
-struct RoundedDarkButton: ButtonStyle {
-    @ObservedObject var theme: Theme
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 18, weight: .semibold))
-            .frame(maxWidth: .infinity)
-            .padding()
-
-            .foregroundColor(ThemeColor.primaryUi01(for: theme.activeTheme).color)
-            .background(ThemeColor.primaryText01(for: theme.activeTheme).color)
-
-            .cornerRadius(ViewConstants.buttonCornerRadius)
-            .applyButtonEffect(isPressed: configuration.isPressed)
-            .contentShape(Rectangle())
-    }
-}
-
 /// A button that contains a stroke
 struct StrokeButton: ButtonStyle {
     let textColor: Color
@@ -341,13 +322,6 @@ struct SimpleTextButtonStyle: ButtonStyle {
     }
 }
 
-struct ClickyButton: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .applyButtonEffect(isPressed: configuration.isPressed)
-    }
-}
-
 /// Default button style for buttons with images
 struct PrimaryButtonStyle: ButtonStyle {
     @EnvironmentObject var theme: Theme
@@ -412,7 +386,7 @@ extension View {
         self
             .scaleEffect(isPressed ? scaleEffectNumber : 1.0, anchor: .center)
             .animation(.interpolatingSpring(stiffness: 350, damping: 10, initialVelocity: 10), value: isPressed)
-            .onChange(of: isPressed) { pressed in
+            .onChange(of: isPressed) { _, pressed in
                 guard enableHaptic, pressed else { return }
 
                 UIImpactFeedbackGenerator(style: .rigid).impactOccurred()

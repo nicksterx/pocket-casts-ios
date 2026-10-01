@@ -1,21 +1,6 @@
 import UIKit
 import SwiftUI
 
-class PlaylistHeaderViewCellPlaceholder: ListItem {
-    override var differenceIdentifier: String {
-        "playlistHeaderResult"
-    }
-
-    static func == (lhs: PlaylistHeaderViewCellPlaceholder, rhs: PlaylistHeaderViewCellPlaceholder) -> Bool {
-        lhs.handleIsEqual(rhs)
-    }
-
-    override func handleIsEqual(_ otherItem: ListItem) -> Bool {
-        otherItem is PlaylistHeaderViewCellPlaceholder
-    }
-}
-
-
 class PlaylistHeaderViewCell: ThemeableCell {
     static let reuseIdentifier = "PlaylistHeaderViewCellIdentifier"
 
@@ -43,7 +28,7 @@ class PlaylistHeaderViewCell: ThemeableCell {
     func configure(viewModel: PlaylistDetailViewModel) {
         contentConfiguration = UIHostingConfiguration {
             PlaylistHeaderView(viewModel: viewModel)
-                .environmentObject(Theme.sharedTheme)
+                .environmentObject(Theme.shared)
                 .frame(maxWidth: .infinity, minHeight: 335, alignment: .leading)
         }
         .margins(.horizontal, 0)

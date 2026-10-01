@@ -9,30 +9,20 @@ class ProgressLine: UIView {
         }
     }
 
-    var showsBuffering = false {
-        didSet {
-            recalculatePositionRects(true)
-        }
-    }
-
     var progress: CGFloat = 0 {
         didSet {
             recalculatePositionRects(true)
         }
     }
 
-    var buferredAmount: CGFloat = 0 {
+    var bufferedAmount: CGFloat = 0 {
         didSet {
             recalculatePositionRects(true)
         }
     }
 
-    private let progressStyle: ThemeStyle = .playerHighlight01
-    private let bufferStyle: ThemeStyle = .playerHighlight06
-    private let bgTrackStyle: ThemeStyle = .playerHighlight07
-
     func updateColors() {
-        let theme = Theme.sharedTheme.activeTheme
+        let theme = Theme.shared.activeTheme
         backgroundColor = PlayerColorHelper.playerHighlightColor07(for: theme)
         progressLayer().bufferingColor = PlayerColorHelper.playerHighlightColor07(for: theme).cgColor
         progressLayer().progressColor = PlayerColorHelper.playerHighlightColor01(for: theme).cgColor
@@ -60,10 +50,10 @@ class ProgressLine: UIView {
 
         progressLayer().bgRect = CGRect(x: 0, y: 0, width: availableWidth, height: lineHeight)
         progressLayer().progressRect = CGRect(x: 0, y: 0, width: progressSize, height: lineHeight)
-        if buferredAmount == 0 {
+        if bufferedAmount == 0 {
             progressLayer().bufferRect = CGRect.zero
         } else {
-            progressLayer().bufferRect = CGRect(x: progressSize, y: 0, width: (availableWidth - progressSize) * buferredAmount, height: lineHeight)
+            progressLayer().bufferRect = CGRect(x: progressSize, y: 0, width: (availableWidth - progressSize) * bufferedAmount, height: lineHeight)
         }
 
         if !animated {

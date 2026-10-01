@@ -3,7 +3,7 @@ import PocketCastsDataModel
 import PocketCastsServer
 import PocketCastsUtils
 
-extension LibraryType: AnalyticsDescribable {
+extension LibraryType {
     enum Old: Int {
         case fourByFour = 1, threeByThree = 2, list = 3
     }
@@ -36,20 +36,9 @@ extension LibraryType: AnalyticsDescribable {
             return .list
         }
     }
-
-    var analyticsDescription: String {
-        switch self {
-        case .fourByFour:
-            return "four_by_four"
-        case .threeByThree:
-            return "three_by_three"
-        case .list:
-            return "list"
-        }
-    }
 }
 
-extension BadgeType: AnalyticsDescribable {
+extension BadgeType {
     var description: String {
         switch self {
         case .off:
@@ -58,17 +47,6 @@ extension BadgeType: AnalyticsDescribable {
             return L10n.podcastsBadgeLatestEpisode
         case .allUnplayed:
             return L10n.podcastsBadgeAllUnplayed
-        }
-    }
-
-    var analyticsDescription: String {
-        switch self {
-        case .off:
-            return "off"
-        case .latestEpisode:
-            return "only_latest_episode"
-        case .allUnplayed:
-            return "unfinished_episodes"
         }
     }
 }
@@ -85,7 +63,7 @@ enum PodcastLicensing: Int32 {
     case keepEpisodesAfterExpiry = 0, deleteEpisodesAfterExpiry = 1
 }
 
-extension PodcastEpisodeSortOrder: AnalyticsDescribable {
+extension PodcastEpisodeSortOrder {
     var description: String {
         switch self {
         case .titleAtoZ:
@@ -104,25 +82,6 @@ extension PodcastEpisodeSortOrder: AnalyticsDescribable {
             return L10n.podcastsEpisodeSortSerial
         }
     }
-
-    var analyticsDescription: String {
-        switch self {
-        case .titleAtoZ:
-            return "title_a_to_z"
-        case .titleZtoA:
-            return "title_z_to_a"
-        case .newestToOldest:
-            return "newest_to_oldest"
-        case .oldestToNewest:
-            return "oldest_to_newest"
-        case .shortestToLongest:
-            return "shortest_to_longest"
-        case .longestToShortest:
-            return "longest_to_shortest"
-        case .serial:
-            return "serial"
-        }
-    }
 }
 
 extension LibrarySort.Old: AnalyticsDescribable {
@@ -131,7 +90,7 @@ extension LibrarySort.Old: AnalyticsDescribable {
     }
 }
 
-extension LibrarySort: AnalyticsDescribable {
+extension LibrarySort {
     enum Old: Int {
         case dateAddedNewestToOldest = 1, titleAtoZ = 2, episodeDateNewestToOldest = 5, custom = 6, recentlyPlayed = 7
     }
@@ -187,58 +146,6 @@ extension LibrarySort: AnalyticsDescribable {
             return L10n.podcastsLibrarySortEpisodeRecentlyPlayed
         }
     }
-
-    var analyticsDescription: String {
-        switch self {
-        case .dateAddedNewestToOldest:
-            return "date_added"
-        case .titleAtoZ:
-            return "name"
-        case .episodeDateNewestToOldest:
-            return "episode_release_date"
-        case .custom:
-            return "drag_and_drop"
-        case .recentlyPlayed:
-            return "episode_recently_played"
-        }
-    }
-}
-
-extension AppBadge: AnalyticsDescribable {
-    var analyticsDescription: String {
-        switch self {
-        case .off:
-            return "off"
-        case .totalUnplayed:
-            return "total_unplayed"
-        case .newSinceLastOpened:
-            return "new_since_app_opened"
-        case .filterCount:
-            return "filter_count"
-        }
-    }
-}
-
-extension PrimaryRowAction: AnalyticsDescribable {
-    var analyticsDescription: String {
-        switch self {
-        case .stream:
-            return "play"
-        case .download:
-            return "download"
-        }
-    }
-}
-
-extension PrimaryUpNextSwipeAction: AnalyticsDescribable {
-    var analyticsDescription: String {
-        switch self {
-        case .playNext:
-            return "play_next"
-        case .playLast:
-            return "play_last"
-        }
-    }
 }
 
 enum PlaylistIcon: Int32 {
@@ -252,23 +159,15 @@ enum PlaylistIcon: Int32 {
          redTop, blueTop, greenTop, purpleTop, yellowTop
 }
 
-extension PlayerAction: AnalyticsDescribable {
+extension PlayerAction {
 
     /// Specify default actions and their order
     static var defaultActions: [PlayerAction] {
-        if FeatureFlag.playlistsRebranding.enabled {
-            [
-                .effects, .sleepTimer, .routePicker, .shareEpisode, .addToPlaylist, .download,
-                .transcript, .goToPodcast, .addBookmark, .markPlayed,
-                .starEpisode, .chromecast, .archive
-            ]
-        } else {
-            [
-                .effects, .sleepTimer, .routePicker, .shareEpisode, .download,
-                .transcript, .goToPodcast, .addBookmark, .markPlayed,
-                .starEpisode, .chromecast, .archive
-            ]
-        }
+        [
+            .effects, .sleepTimer, .routePicker, .shareEpisode, .addToPlaylist, .download,
+            .transcript, .goToPodcast, .addBookmark, .markPlayed,
+            .starEpisode, .chromecast, .archive, .videoToggle
+        ]
     }
 
     public init?(int: Int) {
@@ -299,6 +198,8 @@ extension PlayerAction: AnalyticsDescribable {
             self = .download
         case 13:
             self = .addToPlaylist
+        case 14:
+            self = .videoToggle
         default:
             return nil
         }
@@ -332,6 +233,8 @@ extension PlayerAction: AnalyticsDescribable {
             return 12
         case .addToPlaylist:
             return 13
+        case .videoToggle:
+            return 14
         }
     }
 
@@ -380,6 +283,8 @@ extension PlayerAction: AnalyticsDescribable {
             return episode.downloaded(pathFinder: DownloadManager.shared) ? L10n.removeDownload : (episode.isInDownloadProcess ? L10n.statusDownloading : L10n.download)
         case .addToPlaylist:
             return L10n.playlistManualEpisodeAddToPlaylist
+        case .videoToggle:
+            return PlaybackManager.shared.shouldRenderVideo() ? L10n.playerActionHideVideo : L10n.playerActionShowVideo
         }
     }
 
@@ -425,6 +330,8 @@ extension PlayerAction: AnalyticsDescribable {
             return episode.downloaded(pathFinder: DownloadManager.shared) ? "episode-downloaded" : "episode-download"
         case .addToPlaylist:
             return "playlist-add-episode"
+        case .videoToggle:
+            return PlaybackManager.shared.shouldRenderVideo() ? "video_off" : "video_on"
         }
     }
 
@@ -459,6 +366,8 @@ extension PlayerAction: AnalyticsDescribable {
             return episode.downloaded(pathFinder: DownloadManager.shared) ? "episode-downloaded" : "episode-download"
         case .addToPlaylist:
             return "playlist-add-episode"
+        case .videoToggle:
+            return PlaybackManager.shared.shouldRenderVideo() ? "video_off" : "video_on"
         }
     }
 
@@ -466,6 +375,8 @@ extension PlayerAction: AnalyticsDescribable {
         switch self {
         case .starEpisode, .shareEpisode:
             return episode is Episode
+        case .videoToggle:
+            return PlaybackManager.shared.canToggleVideoRendering()
         default:
             return true
         }
@@ -474,50 +385,14 @@ extension PlayerAction: AnalyticsDescribable {
     /// Determines whether the action should be available as an option
     /// If false, the action will be hidden from the player shelf and overflow menu
     var isAvailable: Bool {
-        switch self {
-        case .addToPlaylist:
-            return FeatureFlag.playlistsRebranding.enabled
-        default:
-            return true
-        }
-    }
-
-    var analyticsDescription: String {
-        switch self {
-        case .effects:
-            return "playback_effects"
-        case .sleepTimer:
-            return "sleep_timer"
-        case .routePicker:
-            return "route_picker"
-        case .starEpisode:
-            return "star_episode"
-        case .shareEpisode:
-            return "share_episode"
-        case .goToPodcast:
-            return "go_to_podcast"
-        case .chromecast:
-            return "chromecast"
-        case .markPlayed:
-            return "mark_as_played"
-        case .archive:
-            return "archive"
-        case .addBookmark:
-            return "bookmark"
-        case .transcript:
-            return "transcript"
-        case .download:
-            return "download"
-        case .addToPlaylist:
-            return "add_to_playlist"
-        }
+        true
     }
 }
 
 enum MultiSelectAction: Int32, CaseIterable, AnalyticsDescribable {
     case playLast = 1, playNext, download, archive, markAsPlayed, star, moveToTop, moveToBottom, removeFromUpNext, unstar, unarchive, removeDownload, markAsUnplayed, delete, share, removeListeningHistory, addToPlaylist
 
-    func title() -> String {
+    func title(isUpNextContext: Bool = false) -> String {
         switch self {
         case .playLast:
             return L10n.playLast
@@ -536,7 +411,9 @@ enum MultiSelectAction: Int32, CaseIterable, AnalyticsDescribable {
         case .moveToBottom:
             return L10n.moveToBottom
         case .removeFromUpNext:
-            return L10n.remove
+            // Inside the Up Next screen the context is obvious, so the shorter label is enough.
+            // Elsewhere, spell out where the episodes are being removed from.
+            return isUpNextContext ? L10n.remove : L10n.removeFromUpNext
         case .unstar:
             return L10n.multiSelectUnstar
         case .unarchive:
@@ -642,6 +519,10 @@ enum MultiSelectAction: Int32, CaseIterable, AnalyticsDescribable {
         case .addToPlaylist:
             // Always show the option; toast will be shown if files are selected
             return true
+
+        case .removeFromUpNext:
+            // Only relevant when at least one selected episode is currently in Up Next
+            return episodes.contains { PlaybackManager.shared.inUpNext(episode: $0) }
 
         default:
             return true

@@ -190,7 +190,7 @@ class CustomSegmentedControl: UIControl {
             }
             actionViews.append(segmentView)
 
-            // add seperator if required
+            // add separator if required
             if willHaveTrailingSeperator {
                 let separator = UIView()
                 separator.translatesAutoresizingMaskIntoConstraints = false
@@ -295,10 +295,6 @@ class CustomSegmentedControl: UIControl {
     // MARK: - Accessibility Support
 
     private var actions: [SegmentedAction] = []
-
-    func setActionsWithAccessibility(_ actions: [SegmentedAction]) {
-        setActions(actions)
-    }
 
     private func clampSelectedIndexIfNeeded() {
         if actions.isEmpty {

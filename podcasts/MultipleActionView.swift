@@ -16,6 +16,10 @@ class MultipleActionView: UIView {
         self.themeOverride = themeOverride
 
         super.init(frame: frame)
+
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: MultipleActionView, _) in
+            view.updateSize()
+        }
     }
 
     @available(*, unavailable)
@@ -33,7 +37,7 @@ class MultipleActionView: UIView {
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
 
-        if let icon = icon, let image = UIImage(named: icon)?.tintedImage(ThemeColor.primaryIcon01(for: themeOverride)) {
+        if let icon, let image = UIImage(named: icon)?.tintedImage(ThemeColor.primaryIcon01(for: themeOverride)) {
             let imageView = UIImageView(image: image)
             imageView.translatesAutoresizingMaskIntoConstraints = false
             addSubview(imageView)
@@ -96,11 +100,5 @@ class MultipleActionView: UIView {
             let imageSize = max(24, metric.scaledValue(for: 24))
             imageView.updateSizeConstraints(to: imageSize)
         }
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory else { return }
-        updateSize()
     }
 }

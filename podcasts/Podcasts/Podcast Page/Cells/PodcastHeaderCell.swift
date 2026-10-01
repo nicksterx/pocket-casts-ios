@@ -34,13 +34,13 @@ class PodcastHeaderCell: UITableViewCell {
         guard let viewController = self.viewController else { return }
         self.backgroundColor = .clear
         self.selectionStyle = .none
-        configureCellFromSwiftUIView(cell: self, viewController: viewController, rootView: {
-            ContentSizeGeometryReader { proxy in
-                PodcastHeaderView(viewModel: self.viewModel)
+        configureCellFromSwiftUIView(cell: self, viewController: viewController, rootView: { [weak self, viewModel] in
+            ContentSizeGeometryReader { _ in
+                PodcastHeaderView(viewModel: viewModel)
                     .setupDefaultEnvironment()
                     .ignoresSafeArea()//Needs to be done in order to allow expansion of the view to navigation area when scrolling up
             } contentSizeUpdated: { [weak self] size in
-                guard let self = self else { return }
+                guard let self, let viewController = self.viewController else { return }
                 calculatedHeight = size.height
                 if firstTime {
                     firstTime = false
@@ -50,7 +50,6 @@ class PodcastHeaderCell: UITableViewCell {
                     viewController.tableView().beginUpdates()
                     viewController.tableView().endUpdates()
                 }
-
             }
         })
     }

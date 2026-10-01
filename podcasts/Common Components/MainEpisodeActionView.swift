@@ -1,6 +1,7 @@
 import PocketCastsDataModel
 import UIKit
 
+@MainActor
 protocol MainEpisodeActionViewDelegate: AnyObject {
     func downloadTapped()
     func stopDownloadTapped()
@@ -10,6 +11,7 @@ protocol MainEpisodeActionViewDelegate: AnyObject {
     func waitingForWifiTapped()
 }
 
+@MainActor
 class MainEpisodeActionView: UIView {
     enum ButtonState {
         case download, pauseDownload, play, pause, error, waitingForWifi, playedPlay, playedDownload
@@ -30,7 +32,6 @@ class MainEpisodeActionView: UIView {
 
     var rightPadding: CGFloat = 0
     var bottomPadding: CGFloat = 0
-    var playedColor: UIColor?
 
     weak var delegate: MainEpisodeActionViewDelegate?
 
@@ -73,7 +74,7 @@ class MainEpisodeActionView: UIView {
     // MARK: - User Actions
 
     @objc private func buttonTapped() {
-        guard let delegate = delegate else { return }
+        guard let delegate else { return }
 
         if state == .play {
             delegate.playTapped()
@@ -95,13 +96,13 @@ class MainEpisodeActionView: UIView {
     func populateFrom(episode: BaseEpisode) {
         episodeUuid = episode.uuid
 
-        let isCurrent = PlaybackManager.shared.isNowPlayingEpisode(episodeUuid: episodeUuid)
+        let isCurrent = PlaybackManager.shared.isCurrentEpisode(uuid: episode.uuid)
 
         // update download and play progress
         if episode.downloaded(pathFinder: DownloadManager.shared) {
             setDownloadProgress(1)
         } else {
-            let progress = DownloadManager.shared.progressManager.progressForEpisode(episode.uuid)
+            let progress = DownloadManager.shared.progressManager.progress(forEpisodeUuid: episode.uuid)
             updateDownloadProgress(progress)
         }
 
@@ -113,10 +114,10 @@ class MainEpisodeActionView: UIView {
         }
 
         // update button state
-        let isPlaying = (isCurrent && PlaybackManager.shared.playing())
-        let googleCastConnected = GoogleCastManager.sharedManager.connected()
-        let primaryRowActionIsDownload = Settings.primaryRowAction() == .download
-        if googleCastConnected || isCurrent {
+        let isPlaying = (isCurrent && PlaybackManager.shared.isPlaying)
+        let googleCastConnected = GoogleCastManager.shared.connected()
+        let primaryRowActionIsDownload = Settings.primaryRowAction == .download
+        if googleCastConnected {
             state = isPlaying ? .pause : .play
         } else if episode.played() {
             state = episode.downloaded(pathFinder: DownloadManager.shared) ? .playedPlay : .playedDownload
@@ -138,7 +139,7 @@ class MainEpisodeActionView: UIView {
     // MARK: - Update Events
 
     @objc private func playbackDidProgress() {
-        guard let playingEpisode = PlaybackManager.shared.currentEpisode(), let uuid = episodeUuid, uuid == playingEpisode.uuid else { return }
+        guard let playingEpisode = PlaybackManager.shared.currentEpisode, let uuid = episodeUuid, uuid == playingEpisode.uuid else { return }
 
         // don't update the progress of episodes that are downloading
         if playingEpisode.downloading() { return }
@@ -231,10 +232,10 @@ extension MainEpisodeActionView {
 
             accessibilityLabel = L10n.play
         case .playedPlay:
-            drawImageInCenter(imageName: "list_played", color: AppTheme.episodeCellPlayedIndicatorColor())
+            drawImageInCenter(imageName: "list_played", color: AppTheme.episodeCellPlayedIndicatorColor)
             accessibilityLabel = L10n.statusPlayed
         case .playedDownload:
-            drawImageInCenter(imageName: "list_played", color: AppTheme.episodeCellPlayedIndicatorColor())
+            drawImageInCenter(imageName: "list_played", color: AppTheme.episodeCellPlayedIndicatorColor)
             accessibilityLabel = L10n.statusPlayed
         case .download:
             drawDownloadArrow(context: context, color: tintColor)
@@ -283,11 +284,15 @@ extension MainEpisodeActionView {
 
             accessibilityLabel = L10n.podcastPauseDownload
         case .waitingForWifi:
-            let waitingColor = AppTheme.waitingForWifiColor()
+            let waitingColor = AppTheme.waitingForWifiColor
             waitingColor.setFill()
 
+            let startingY = circleCenter.y - (Self.circleRadius * enlargementScale / 3)
+            let startingX = circleCenter.x - ((Self.circleRadius + 1) * enlargementScale / 2)
+
             // draw the WiFi symbol
-            let translation = CGAffineTransform(translationX: 14 - rightPadding, y: 15 + (bottomPadding / 2.0))
+            let translation = CGAffineTransform(translationX: startingX, y: startingY)
+            let scale = CGAffineTransform(scaleX: enlargementScale, y: enlargementScale)
 
             let curve1 = UIBezierPath()
             curve1.move(to: CGPoint(x: 7.78, y: 0))
@@ -298,6 +303,7 @@ extension MainEpisodeActionView {
             curve1.addLine(to: CGPoint(x: 15.56, y: 3.22))
             curve1.addCurve(to: CGPoint(x: 7.78, y: 0), controlPoint1: CGPoint(x: 13.57, y: 1.23), controlPoint2: CGPoint(x: 10.82, y: 0))
             curve1.close()
+            curve1.apply(scale)
             curve1.apply(translation)
             curve1.fill()
 
@@ -310,6 +316,7 @@ extension MainEpisodeActionView {
             curve2.addCurve(to: CGPoint(x: 7.78, y: 4), controlPoint1: CGPoint(x: 11.46, y: 4.78), controlPoint2: CGPoint(x: 9.71, y: 4))
             curve2.addCurve(to: CGPoint(x: 2.83, y: 6.05), controlPoint1: CGPoint(x: 5.85, y: 4), controlPoint2: CGPoint(x: 4.1, y: 4.78))
             curve2.close()
+            curve2.apply(scale)
             curve2.apply(translation)
             curve2.fill()
 
@@ -324,6 +331,7 @@ extension MainEpisodeActionView {
             dot.addCurve(to: CGPoint(x: 7.78, y: 8), controlPoint1: CGPoint(x: 9.36, y: 8.34), controlPoint2: CGPoint(x: 8.61, y: 8))
             dot.addCurve(to: CGPoint(x: 5.66, y: 8.88), controlPoint1: CGPoint(x: 6.95, y: 8), controlPoint2: CGPoint(x: 6.2, y: 8.34))
             dot.close()
+            dot.apply(scale)
             dot.apply(translation)
             dot.fill()
 
@@ -331,7 +339,7 @@ extension MainEpisodeActionView {
             drawEmptyCircle(context: context, color: waitingColor)
             accessibilityLabel = L10n.waitForWifi
         case .error:
-            let color = AppTheme.waitingForWifiColor()
+            let color = AppTheme.waitingForWifiColor
             drawImageInCenter(imageName: "list_retry", color: color)
             drawEmptyCircle(context: context, color: color)
             accessibilityLabel = L10n.error

@@ -8,15 +8,15 @@ extension CarPlaySceneDelegate {
     var podcastTabSections: [CPListSection] {
         var podcastItems = [CPListTemplateItem]()
 
-        let gridItems = HomeGridDataHelper.gridItems(orderedBy: Settings.homeFolderSortOrder())
+        let gridItems = HomeGridDataHelper.gridItems(orderedBy: Settings.homeFolderSortOrder)
 
         for item in gridItems {
             if let podcast = item.podcast {
                 let item = convertPodcastToListItem(podcast)
                 podcastItems.append(item)
             } else if let folder = item.folder {
-                let podcastCount = DataManager.sharedManager.countOfPodcastsInFolder(folder: folder)
-                let item = CPListItem(text: folder.name, detailText: L10n.podcastCount(podcastCount), image: CarPlayImageHelper.imageForFolder(folder))
+                let podcastCount = DataManager.shared.countOfPodcastsInFolder(folder: folder)
+                let item = CPListItem(text: folder.name, detailText: L10n.podcastCount(podcastCount), image: CarPlayImageHelper.image(for: folder))
 
                 item.accessoryType = .disclosureIndicator
                 item.handler = { [weak self] _, completion in
@@ -30,7 +30,7 @@ extension CarPlaySceneDelegate {
         // the podcast tab is always what CarPlay opens first, however it doesn't show the Now Playing tab unless something is actively playing
         // so with that in mind if the user has something in Up Next and Pocket Casts is paused, help them find their now playing stuff by adding that as a section here
         let upNextEpisodes = PlaybackManager.shared.allEpisodesInQueue(includeNowPlaying: true)
-        if upNextEpisodes.count > 0 {
+        if !upNextEpisodes.isEmpty {
             let truncatedList = Array(upNextEpisodes.prefix(8))
             let imageRowItem = createUpNextImageItem(episodes: truncatedList)
 
@@ -54,14 +54,12 @@ extension CarPlaySceneDelegate {
 extension CarPlaySceneDelegate {
     private var filterTabSections: [CPListSection] {
         var filterItems = [CPListItem]()
-        for filter in DataManager.sharedManager.allPlaylists(includeDeleted: false) {
+        for filter in DataManager.shared.allPlaylists(includeDeleted: false) {
             var detail: String? = nil
-            if FeatureFlag.playlistsRebranding.enabled {
-                if filter.manual == false {
-                    detail = L10n.smartPlaylist
-                }
+            if filter.manual == false {
+                detail = L10n.smartPlaylist
             }
-            let image = FeatureFlag.playlistsRebranding.enabled ? filter.grid() : UIImage(named: filter.iconImageNameCarPlay())
+            let image = filter.grid()
             let item = CPListItem(text: filter.playlistName, detailText: detail, image: image)
             item.accessoryType = .disclosureIndicator
             item.handler = { [weak self] _, completion in
@@ -76,7 +74,7 @@ extension CarPlaySceneDelegate {
     }
 
     func createFiltersTab() -> CPListTemplate {
-        let title = FeatureFlag.playlistsRebranding.enabled ? L10n.playlists : L10n.filters
+        let title = L10n.playlists
         return CarPlayListData.template(title: title, emptyTitle: L10n.watchNoFilters, image: UIImage(named: "car_tab_filters")) { [weak self] in
             guard let self else { return nil }
             return self.filterTabSections
@@ -88,7 +86,7 @@ extension CarPlaySceneDelegate {
 
 extension CarPlaySceneDelegate {
     private var downloadTabSections: [CPListSection] {
-        let downloadedEpisodes = DataManager.sharedManager.findEpisodesWhere(customWhere: "episodeStatus == \(DownloadStatus.downloaded.rawValue) ORDER BY lastDownloadAttemptDate DESC LIMIT \(Constants.Limits.maxCarplayItems)", arguments: nil)
+        let downloadedEpisodes = DataManager.shared.findEpisodesWhere(customWhere: "episodeStatus == \(DownloadStatus.downloaded.rawValue) ORDER BY lastDownloadAttemptDate DESC LIMIT \(Constants.Limits.maxCarplayItems)", arguments: nil)
         let items = convertToListItems(episodes: downloadedEpisodes, showArtwork: true, playlist: .downloads)
 
         return [CPListSection(items: items)]
@@ -107,7 +105,7 @@ extension CarPlaySceneDelegate {
 
 extension CarPlaySceneDelegate {
     func createMoreTab() -> CPListTemplate {
-        return CarPlayListData.staticTemplate(title: L10n.carplayMore, image: UIImage(named: "car_tab_more")) {
+        return CarPlayListData.staticTemplate(title: L10n.carplayMore, image: UIImage(named: "car_tab_more")) { [weak self] in
             let listeningHistoryItem = CPListItem(text: L10n.listeningHistory, detailText: nil, image: UIImage(named: "car_more_listening_history"))
             listeningHistoryItem.accessoryType = .disclosureIndicator
             listeningHistoryItem.handler = { [weak self] _, completion in

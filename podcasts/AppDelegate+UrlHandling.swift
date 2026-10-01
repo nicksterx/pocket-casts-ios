@@ -4,6 +4,8 @@ import JLRoutes
 import PocketCastsDataModel
 import PocketCastsServer
 import PocketCastsUtils
+import UIKit
+import UniformTypeIdentifiers
 
 extension AppDelegate {
     func application(_ application: UIApplication, performActionFor shortcutItem: UIApplicationShortcutItem, completionHandler: @escaping (Bool) -> Void) {
@@ -56,7 +58,7 @@ extension AppDelegate {
                     }
                 })
             } else if type.conforms(to: .audio) || type.conforms(to: .movie) {
-                NavigationManager.sharedManager.navigateTo(NavigationManager.uploadedPageKey, data: [NavigationManager.uploadFileKey: url])
+                NavigationManager.shared.navigateTo(NavigationManager.uploadedPageKey, data: [NavigationManager.uploadFileKey: url])
             }
         } else {
             // check to see what the scheme is we support itpc, http, feed & our own pktc
@@ -83,13 +85,13 @@ extension AppDelegate {
                 strongSelf.openPlayerWhenReadyFromExternalEvent()
                 AnalyticsHelper.forceTouchPlay()
             } else if shortcut == "markAsPlayed" {
-                if let episode = PlaybackManager.shared.currentEpisode() {
+                if let episode = PlaybackManager.shared.currentEpisode {
                     AnalyticsEpisodeHelper.shared.currentSource = .appIconMenu
                     EpisodeManager.markAsPlayed(episode: episode, fireNotification: true)
                     AnalyticsHelper.forceTouchMarkPlayed()
                 }
             } else if shortcut == "discover" {
-                NavigationManager.sharedManager.navigateTo(NavigationManager.discoverPageKey, data: nil)
+                NavigationManager.shared.navigateTo(NavigationManager.discoverPageKey, data: nil)
                 AnalyticsHelper.forceTouchDiscover()
             }
 
@@ -98,9 +100,9 @@ extension AppDelegate {
 
         // open a playlist from a shortcut
         JLRoutes.global().addRoute("/shortcuts/filter/:filterId") { parameters -> Bool in
-            guard let playlistId = parameters["filterId"] as? String, let playlist = DataManager.sharedManager.findPlaylist(uuid: playlistId) else { return false }
+            guard let playlistId = parameters["filterId"] as? String, let playlist = DataManager.shared.findPlaylist(uuid: playlistId) else { return false }
 
-            NavigationManager.sharedManager.navigateTo(NavigationManager.filterPageKey, data: [NavigationManager.filterUuidKey: playlist.uuid])
+            NavigationManager.shared.navigateTo(NavigationManager.filterPageKey, data: [NavigationManager.filterUuidKey: playlist.uuid])
             AnalyticsHelper.forceTouchTopFilter()
 
             return true
@@ -108,9 +110,9 @@ extension AppDelegate {
 
         // open a podcast from a shortcut
         JLRoutes.global().addRoute("/shortcuts/podcast/:podcastUuid") { parameters -> Bool in
-            guard let podcastUuid = parameters["podcastUuid"] as? String, let podcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid) else { return false }
+            guard let podcastUuid = parameters["podcastUuid"] as? String, let podcast = DataManager.shared.findPodcast(uuid: podcastUuid) else { return false }
 
-            NavigationManager.sharedManager.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcast])
+            NavigationManager.shared.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcast])
             AnalyticsHelper.forceTouchPodcast()
 
             return true
@@ -156,13 +158,13 @@ extension AppDelegate {
             if let pathComponents = paramDict[JLRouteWildcardComponentsKey] as? [String], let itemID = pathComponents.first {
                 data = [NavigationManager.discoverListKey: itemID]
             }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.discoverPageKey, data: data)
+            NavigationManager.shared.navigateTo(NavigationManager.discoverPageKey, data: data)
 
             return true
         }
         // developer features:
         JLRoutes.global().addRoute("/resetalltours") { _ -> Bool in
-            Settings.setWhatsNewLastAcknowledged(0)
+            Settings.whatsNewLastAcknowledged = 0
 
             return true
         }
@@ -202,7 +204,7 @@ extension AppDelegate {
                             self?.hideProgressDialog()
 
                             if success {
-                                NavigationManager.sharedManager.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: uuid])
+                                NavigationManager.shared.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: uuid])
                             } else {
                                 SJUIUtils.showAlert(title: L10n.error, message: L10n.errorGeneralPodcastNotFound, from: SceneHelper.rootViewController())
                             }
@@ -218,12 +220,12 @@ extension AppDelegate {
         JLRoutes.global().addRoute("/widget/*") { [weak self] parameters -> Bool in
             guard let strongSelf = self, let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String], let episodeUuid = pathComponents[safe: 0] else { return false }
 
-            guard let episode = DataManager.sharedManager.findEpisode(uuid: episodeUuid) else { return true }
+            guard let episode = DataManager.shared.findEpisode(uuid: episodeUuid) else { return true }
 
             strongSelf.openPlayerWhenReadyFromExternalEvent()
 
-            if PlaybackManager.shared.isNowPlayingEpisode(episodeUuid: episode.uuid) {
-                if !PlaybackManager.shared.playing() {
+            if PlaybackManager.shared.isCurrentEpisode(uuid: episode.uuid) {
+                if !PlaybackManager.shared.isPlaying {
                     PlaybackManager.shared.play()
                 }
             } else {
@@ -237,17 +239,17 @@ extension AppDelegate {
         JLRoutes.global().addRoute("/widget-episode/*") { [weak self] parameters -> Bool in
             guard let strongSelf = self, let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String], let episodeUuid = pathComponents[safe: 0] else { return false }
 
-            guard let baseEpisode = DataManager.sharedManager.findBaseEpisode(uuid: episodeUuid) else { return true }
+            guard let baseEpisode = DataManager.shared.findBaseEpisode(uuid: episodeUuid) else { return true }
 
-            if PlaybackManager.shared.isNowPlayingEpisode(episodeUuid: baseEpisode.uuid) {
+            if PlaybackManager.shared.isCurrentEpisode(uuid: baseEpisode.uuid) {
                 strongSelf.openPlayerWhenReadyFromExternalEvent()
                 Analytics.track(.widgetInteraction, properties: ["action": "now_playing"])
             } else {
                 Analytics.track(.widgetInteraction, properties: ["action": "episode"])
                 if let episode = baseEpisode as? Episode {
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.episodePageKey, data: [NavigationManager.episodeUuidKey: episode.uuid])
+                    NavigationManager.shared.navigateTo(NavigationManager.episodePageKey, data: [NavigationManager.episodeUuidKey: episode.uuid])
                 } else if baseEpisode is UserEpisode {
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.filesPageKey, data: nil)
+                    NavigationManager.shared.navigateTo(NavigationManager.filesPageKey, data: nil)
                 }
             }
             return true
@@ -298,11 +300,11 @@ extension AppDelegate {
         JLRoutes.global().addRoute("/redeem/promo/*") { [weak self] parameters -> Bool in
             guard self != nil else { return false }
             var promoCode: String?
-            if let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String], pathComponents.count > 0 {
+            if let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String], !pathComponents.isEmpty {
                 promoCode = pathComponents[0]
             }
 
-            NavigationManager.sharedManager.navigateTo(NavigationManager.showPromotionPageKey, data: [NavigationManager.promotionInfoKey: promoCode as Any])
+            NavigationManager.shared.navigateTo(NavigationManager.showPromotionPageKey, data: [NavigationManager.promotionInfoKey: promoCode as Any])
             return true
         }
 
@@ -310,23 +312,23 @@ extension AppDelegate {
         JLRoutes.global().addRoute("/premium/podcast/*") { [weak self] parameters -> Bool in
             guard self != nil else { return false }
 
-            if let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String], pathComponents.count > 0, let podcastTitle = parameters["title"] as? String {
+            if let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String], !pathComponents.isEmpty, let podcastTitle = parameters["title"] as? String {
                 let uuid = pathComponents[0]
 
                 if SyncManager.isUserLoggedIn() {
                     RefreshManager.shared.refreshPodcasts(forceEvenIfRefreshedRecently: true)
                     ApiServerHandler.shared.retrieveSubscriptionStatus()
                     var bundleUuid: String?
-                    if let bundle = SubscriptionHelper.bundleSubscriptionForPodcast(podcastUuid: uuid) {
+                    if let bundle = SubscriptionHelper.bundleSubscription(forPodcastUuid: uuid) {
                         bundleUuid = bundle.bundleUuid
                     }
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.supporterBundlePageKey, data: [NavigationManager.supporterBundleUuid: bundleUuid as Any])
+                    NavigationManager.shared.navigateTo(NavigationManager.supporterBundlePageKey, data: [NavigationManager.supporterBundleUuid: bundleUuid as Any])
                 } else {
                     var podcastInfo = PodcastInfo()
                     podcastInfo.uuid = uuid
                     podcastInfo.title = podcastTitle
 
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.supporterSignInKey, data: [NavigationManager.supporterPodcastInfo: podcastInfo])
+                    NavigationManager.shared.navigateTo(NavigationManager.supporterSignInKey, data: [NavigationManager.supporterPodcastInfo: podcastInfo])
                 }
             }
             return true
@@ -334,15 +336,15 @@ extension AppDelegate {
 
         JLRoutes.global().addRoute("/premium/supporter-contributions/*") { [weak self] parameters -> Bool in
             guard self != nil else { return false }
-            if let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String], pathComponents.count > 0 {
+            if let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String], !pathComponents.isEmpty {
                 let uuid = pathComponents[0]
 
                 if SyncManager.isUserLoggedIn() {
                     RefreshManager.shared.refreshPodcasts(forceEvenIfRefreshedRecently: true)
                     ApiServerHandler.shared.retrieveSubscriptionStatus()
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.supporterBundlePageKey, data: [NavigationManager.supporterBundleUuid: uuid])
+                    NavigationManager.shared.navigateTo(NavigationManager.supporterBundlePageKey, data: [NavigationManager.supporterBundleUuid: uuid])
                 } else {
-                    NavigationManager.sharedManager.navigateTo(NavigationManager.supporterSignInKey, data: [NavigationManager.supporterBundleUuid: uuid])
+                    NavigationManager.shared.navigateTo(NavigationManager.supporterSignInKey, data: [NavigationManager.supporterBundleUuid: uuid])
                 }
             }
             return true
@@ -361,7 +363,7 @@ extension AppDelegate {
             if showFromMiniPlayer {
                 self?.miniPlayer()?.showUpNext(from: source)
             } else {
-                NavigationManager.sharedManager.navigateTo(NavigationManager.upNextPageKey)
+                NavigationManager.shared.navigateTo(NavigationManager.upNextPageKey)
             }
 
             return true
@@ -400,43 +402,44 @@ extension AppDelegate {
         setupNewFeaturesRoutes()
         setupProfileRoutes()
         setupTestFlightIAPRoutes()
+        setupTVPairingRoutes()
     }
 
     func setupOnboardingRoutes() {
-        JLRoutes.global().addRoute("/settings/themes") {[weak self] parameters -> Bool in
+        JLRoutes.global().addRoute("/settings/themes") {[weak self] _ -> Bool in
             guard self != nil else { return false }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.settingsAppearanceKey, data: [NavigationManager.settingsAppearanceShowThemeKey: true])
+            NavigationManager.shared.navigateTo(NavigationManager.settingsAppearanceKey, data: [NavigationManager.settingsAppearanceShowThemeKey: true])
             return true
         }
 
-        JLRoutes.global().addRoute("/signup") {[weak self] parameters -> Bool in
+        JLRoutes.global().addRoute("/signup") {[weak self] _ -> Bool in
             guard self != nil else { return false }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.signUpPageKey)
+            NavigationManager.shared.navigateTo(NavigationManager.signUpPageKey)
             return true
         }
 
-        JLRoutes.global().addRoute("/settings/import") {[weak self] parameters -> Bool in
+        JLRoutes.global().addRoute("/settings/import") {[weak self] _ -> Bool in
             guard self != nil else { return false }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.settingsPageKey, data: [NavigationManager.settingsRowKey: SettingsViewController.TableRow.importSteps])
+            NavigationManager.shared.navigateTo(NavigationManager.settingsPageKey, data: [NavigationManager.settingsRowKey: SettingsViewController.TableRow.importSteps])
             return true
         }
 
-        JLRoutes.global().addRoute("/settings/storage-and-data") {[weak self] parameters -> Bool in
+        JLRoutes.global().addRoute("/settings/storage-and-data") {[weak self] _ -> Bool in
             guard self != nil else { return false }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.settingsPageKey, data: [NavigationManager.settingsRowKey: SettingsViewController.TableRow.storageAndDataUse])
+            NavigationManager.shared.navigateTo(NavigationManager.settingsPageKey, data: [NavigationManager.settingsRowKey: SettingsViewController.TableRow.storageAndDataUse])
             return true
         }
 
-        JLRoutes.global().addRoute("/filters") {[weak self] parameters -> Bool in
+        JLRoutes.global().addRoute("/filters") {[weak self] _ -> Bool in
             guard self != nil else { return false }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.filterPageKey)
+            NavigationManager.shared.navigateTo(NavigationManager.filterPageKey)
             return true
         }
 
         JLRoutes.global().addRoute("/upsell") { parameters -> Bool in
             guard let viewController = SceneHelper.rootViewController() else { return false }
-            let source = PlusUpgradeViewSource(rawValue: ["source"] as? String ?? PlusUpgradeViewSource.deepLink.rawValue) ?? .unknown
-            NavigationManager.sharedManager.navigateTo(NavigationManager.subscriptionRequiredPageKey, data: ["source": source, NavigationManager.subscriptionUpgradeVCKey: viewController])
+            let source = PlusUpgradeViewSource(routeParameters: parameters)
+            NavigationManager.shared.navigateTo(NavigationManager.subscriptionRequiredPageKey, data: ["source": source, NavigationManager.subscriptionUpgradeVCKey: viewController])
             return true
         }
     }
@@ -449,7 +452,7 @@ extension AppDelegate {
             else {
                 return false
             }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.featurePageKey, data: [NavigationManager.featureKey: feature])
+            NavigationManager.shared.navigateTo(NavigationManager.featurePageKey, data: [NavigationManager.featureKey: feature])
             return true
         }
     }
@@ -460,10 +463,22 @@ extension AppDelegate {
                   let pathComponents = parameters[JLRouteWildcardComponentsKey] as? [String],
                   let row = pathComponents.first
             else {
-                NavigationManager.sharedManager.navigateTo(NavigationManager.settingsProfileKey, data: [:])
+                NavigationManager.shared.navigateTo(NavigationManager.settingsProfileKey, data: [:])
                 return true
             }
-            NavigationManager.sharedManager.navigateTo(NavigationManager.settingsProfileKey, data: [NavigationManager.profileRowKey: row])
+            NavigationManager.shared.navigateTo(NavigationManager.settingsProfileKey, data: [NavigationManager.profileRowKey: row])
+            return true
+        }
+    }
+
+    func setupTVPairingRoutes() {
+        JLRoutes.global().addRoute("/pair") { [weak self] parameters -> Bool in
+            guard self != nil else {
+                return true
+            }
+            let userCode = parameters["user_code"] as? String
+
+            NavigationManager.shared.navigateTo(NavigationManager.deviceApprovePageKey, data: [NavigationManager.deviceApproveCodeKey: userCode as Any])
             return true
         }
     }
@@ -506,7 +521,7 @@ extension AppDelegate {
                     let podcastHeader = PodcastHeader(uuid: String(uuid))
                     DispatchQueue.main.async {
                         self.hideProgressDialog()
-                        NavigationManager.sharedManager.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcastHeader])
+                        NavigationManager.shared.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcastHeader])
                     }
 
                     return
@@ -514,10 +529,10 @@ extension AppDelegate {
             }
 
             PodcastManager.shared.importSharedItemFromUrl(path) { item in
-                guard let item = item else {
+                guard let item else {
                     self.hideProgressDialog()
                     FileLog.shared.addMessage("Unable to load shared item \(path)")
-                    if let onErrorOpen = onErrorOpen {
+                    if let onErrorOpen {
                         UIApplication.shared.open(onErrorOpen, options: [:], completionHandler: nil)
                     }
 
@@ -533,7 +548,7 @@ extension AppDelegate {
 
                     DispatchQueue.main.async {
                         self.hideProgressDialog()
-                        NavigationManager.sharedManager.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcastHeader])
+                        NavigationManager.shared.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcastHeader])
                     }
                 } else if let episodeUuid = item.episodeHeader?.uuid, let podcastUuid = item.podcastHeader?.uuid {
                     let timestamp = item.fromTime?.toDouble()
@@ -544,7 +559,7 @@ extension AppDelegate {
     }
 
     private func loadAndShowEpisode(episodeUuid: String, podcastUuid: String, timestamp: TimeInterval? = nil) {
-        if let podcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid, includeUnsubscribed: true) {
+        if let podcast = DataManager.shared.findPodcast(uuid: podcastUuid, includeUnsubscribed: true) {
             // if we're subscribed to the podcast, we'll likely have this episode, just open it
             if podcast.isSubscribed() {
                 openEpisode(episodeUuid, from: podcast, timestamp: timestamp)
@@ -558,7 +573,7 @@ extension AppDelegate {
         }
 
         ServerPodcastManager.shared.addFromUuid(podcastUuid: podcastUuid, subscribe: false, completion: { success in
-            if success, let podcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid, includeUnsubscribed: true) {
+            if success, let podcast = DataManager.shared.findPodcast(uuid: podcastUuid, includeUnsubscribed: true) {
                 self.openEpisode(episodeUuid, from: podcast, timestamp: timestamp)
             } else {
                 DispatchQueue.main.async {
@@ -593,5 +608,11 @@ extension AppDelegate {
 
             return true
         }
+    }
+}
+
+extension PlusUpgradeViewSource {
+    init(routeParameters parameters: [String: Any]) {
+        self = PlusUpgradeViewSource(rawValue: parameters["source"] as? String ?? PlusUpgradeViewSource.deepLink.rawValue) ?? .unknown
     }
 }

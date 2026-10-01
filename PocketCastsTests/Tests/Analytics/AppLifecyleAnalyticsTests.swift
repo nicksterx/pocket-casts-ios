@@ -1,3 +1,4 @@
+@testable import PocketCastsAnalytics
 @testable import podcasts
 import XCTest
 
@@ -5,13 +6,15 @@ class AppLifecycleAnalyticsTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var appLifecyleAnalytics: AppLifecycleAnalytics!
     private var analytics: MockAnalytics!
+    private var now = Date()
 
     override func setUp() {
         userDefaults = UserDefaults(suiteName: "AppLifecycleAnalyticsTests")
         userDefaults.removePersistentDomain(forName: "AppLifecycleAnalyticsTests")
 
+        now = Date()
         analytics = MockAnalytics()
-        appLifecyleAnalytics = AppLifecycleAnalytics(userDefaults: userDefaults, analytics: analytics)
+        appLifecyleAnalytics = AppLifecycleAnalytics(userDefaults: userDefaults, analytics: analytics, now: { [unowned self] in self.now })
     }
 
     // MARK: - Application Installed
@@ -96,7 +99,7 @@ class AppLifecycleAnalyticsTests: XCTestCase {
 
         XCTAssertEqual(applicationInstallState, .sameVersion)
 
-        waitForExpectations(timeout: 1)
+        waitForExpectations(timeout: 0.1)
     }
 
     func testApplicationUpdatedEventFiresOnlyOnce() {
@@ -267,7 +270,7 @@ class AppLifecycleAnalyticsTests: XCTestCase {
         appLifecyleAnalytics.didBecomeActive()
 
         // Dismiss the app after 2 seconds
-        sleep(2)
+        now = now.addingTimeInterval(2)
 
         let exp = expectation(description: "track method should be triggered")
         analytics.didTrack = { event, properties in
@@ -275,7 +278,7 @@ class AppLifecycleAnalyticsTests: XCTestCase {
 
             XCTAssertEqual(event, .applicationClosed)
 
-            guard let properties = properties, let time = properties["time_in_app"] as? String else {
+            guard let properties, let time = properties["time_in_app"] as? String else {
                 XCTFail("Properties and time_in_app should not be nil")
                 return
             }
@@ -295,9 +298,9 @@ class AppLifecycleAnalyticsTests: XCTestCase {
 }
 
 private class MockAnalytics: Analytics {
-    var didTrack: ((_ event: AnalyticsEvent, _ properties: [AnyHashable: Any]?) -> Void)?
+    var didTrack: ((_ event: AnalyticsEvent, _ properties: [String: Sendable]?) -> Void)?
 
-    override func track(_ event: AnalyticsEvent, properties: [AnyHashable: Any]? = nil) {
+    override func track(_ event: AnalyticsEvent, properties: [String: Sendable]? = nil) {
         didTrack?(event, properties)
     }
 }

@@ -2,6 +2,8 @@ import AVFoundation
 import PocketCastsDataModel
 import PocketCastsServer
 import PocketCastsUtils
+import SJUtils
+import VoiceBoostN
 
 class AudioReadTask {
     private let maxSilenceAmountToSave = 1000
@@ -10,7 +12,7 @@ class AudioReadTask {
     private var minGapSizeInFrames = 3
     private var amountOfSilentFramesToReInsert = 1
 
-    private let cancelled = AtomicBool()
+    private let cancelled = Mutex(false)
 
     private let readQueue: DispatchQueue
     private let lock = NSObject()
@@ -22,7 +24,6 @@ class AudioReadTask {
     private var bufferManager: PlayBufferManager
 
     private let bufferLength = UInt32(Constants.Audio.defaultFrameSize)
-    private let bufferByteSize = Float32(MemoryLayout<Float32>.size)
 
     private var foundGap = false
     private var channelCount = 0 as UInt32
@@ -34,11 +35,11 @@ class AudioReadTask {
     private let endOfFileSemaphore = DispatchSemaphore(value: 0)
 
     private var voiceBoostNState: OpaquePointer?
-    private var useVoiceBoostN: AtomicBool?
+    private let useVoiceBoostN: () -> Bool
     private var voiceBoostNSampleRate: Double = 0
     private var hasProcessedFirstBuffer = false
 
-    init(trimSilence: TrimSilenceAmount, audioFile: AVAudioFile, outputFormat: AVAudioFormat, bufferManager: PlayBufferManager, playPositionHint: TimeInterval, frameCount: Int64, useVoiceBoostN: AtomicBool? = nil, sampleRate: Double = 0) {
+    init(trimSilence: TrimSilenceAmount, audioFile: AVAudioFile, outputFormat: AVAudioFormat, bufferManager: PlayBufferManager, playPositionHint: TimeInterval, frameCount: Int64, useVoiceBoostN: @escaping () -> Bool = { false }, sampleRate: Double = 0) throws {
         self.trimSilence = trimSilence
         self.audioFile = audioFile
         self.outputFormat = outputFormat
@@ -60,26 +61,29 @@ class AudioReadTask {
         updateRemoveSilenceNumbers()
 
         if playPositionHint > 0 {
-            currentFramePosition = framePositionForTime(playPositionHint).framePosition
-            if currentFramePosition < audioFile.length {
-                FileLog.shared.addMessage("Setting framePosition to \(currentFramePosition) for file: \(audioFile.url.lastPathComponent)")
-                audioFile.framePosition = currentFramePosition
-            } else {
-                FileLog.shared.addMessage("Attempted to seek past EOF: \(currentFramePosition) >= \(audioFile.length), file: \(audioFile.url.lastPathComponent)")
-                audioFile.framePosition = max(0, audioFile.length - 1)
+            let framePosition = framePositionForTime(playPositionHint).framePosition
+            currentFramePosition = framePosition
+            try SJCommonUtils.catchException {
+                if framePosition < audioFile.length {
+                    FileLog.shared.addMessage("Setting framePosition to \(framePosition) for file: \(audioFile.url.lastPathComponent)")
+                    audioFile.framePosition = framePosition
+                } else {
+                    FileLog.shared.addMessage("Attempted to seek past EOF: \(framePosition) >= \(audioFile.length), file: \(audioFile.url.lastPathComponent)")
+                    audioFile.framePosition = max(0, audioFile.length - 1)
+                }
             }
         }
     }
 
     func startup() {
         readQueue.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             // there are some Core Audio errors that aren't marked as throws in the Swift code, so they'll crash the app
             // that's why we have an Objective-C try/catch block here to catch them (see https://github.com/shiftyjelly/pocketcasts-ios/issues/1493 for more details)
             do {
                 try SJCommonUtils.catchException { [weak self] in
-                    guard let self = self else { return }
+                    guard let self else { return }
 
                     do {
                         while !self.cancelled.value {
@@ -194,16 +198,24 @@ class AudioReadTask {
             return nil
         }
 
-        let audioPCMBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: bufferLength)
+        guard let audioPCMBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: bufferLength) else {
+            bufferManager.readErrorOccurred.value = true
+            cancelled.value = true
+            objc_sync_exit(lock)
+            FileLog.shared.addMessage("[AudioReadTask] Failed to allocate AVAudioPCMBuffer (format: \(outputFormat), capacity: \(bufferLength))")
+
+            return nil
+        }
         do {
-            try audioFile.read(into: audioPCMBuffer!)
+            try audioFile.read(into: audioPCMBuffer)
         } catch {
             objc_sync_exit(lock)
-            throw PlaybackError.errorDuringPlayback
+            FileLog.shared.addMessage("[AudioReadTask] read failed: \(error.localizedDescription)")
+            throw error
         }
 
         // check that we actually read something
-        if audioPCMBuffer?.frameLength == 0 {
+        if audioPCMBuffer.frameLength == 0 {
             objc_sync_exit(lock)
             handleReachedEndOfFile()
 
@@ -211,7 +223,7 @@ class AudioReadTask {
         }
 
         // Handle dynamic VoiceBoostN state creation/destruction
-        let shouldUseVoiceBoostN = useVoiceBoostN?.value == true
+        let shouldUseVoiceBoostN = useVoiceBoostN()
         if shouldUseVoiceBoostN && voiceBoostNState == nil {
             voiceBoostNState = VBN_Create(voiceBoostNSampleRate)
             if hasProcessedFirstBuffer {
@@ -227,10 +239,10 @@ class AudioReadTask {
         hasProcessedFirstBuffer = true
 
         // Process through VoiceBoostN if enabled
-        if let vbnState = voiceBoostNState, let buffer = audioPCMBuffer,
-           let channelData = buffer.floatChannelData {
-            let frameCount = Int32(buffer.frameLength)
-            let bufferChannelCount = Int32(buffer.format.channelCount)
+        if let vbnState = voiceBoostNState,
+           let channelData = audioPCMBuffer.floatChannelData {
+            let frameCount = Int32(audioPCMBuffer.frameLength)
+            let bufferChannelCount = Int32(audioPCMBuffer.format.channelCount)
 
             var channelPointers: [UnsafeMutablePointer<Float>?] = []
             for i in 0..<Int(bufferChannelCount) {
@@ -244,7 +256,7 @@ class AudioReadTask {
 
         currentFramePosition = audioFile.framePosition
         fadeInNextFrame = false
-        if channelCount == 0 { channelCount = (audioPCMBuffer?.audioBufferList.pointee.mNumberBuffers)! }
+        if channelCount == 0 { channelCount = audioPCMBuffer.audioBufferList.pointee.mNumberBuffers }
 
         if channelCount == 0 {
             bufferManager.readErrorOccurred.value = true
@@ -259,25 +271,19 @@ class AudioReadTask {
         // In order to prevent this issue, we convert a mono buffer to stereo buffer
         // For more info, see: https://github.com/Automattic/pocket-casts-ios/issues/62
         var audioBuffer: BufferedAudio
-        if let audioPCMBuffer = audioPCMBuffer,
-           audioPCMBuffer.audioBufferList.pointee.mNumberBuffers == 1,
+        if audioPCMBuffer.audioBufferList.pointee.mNumberBuffers == 1,
            let twoChannelsFormat = AVAudioFormat(standardFormatWithSampleRate: audioFile.processingFormat.sampleRate, channels: 2),
            let twoChannnelBuffer = AVAudioPCMBuffer(pcmFormat: twoChannelsFormat, frameCapacity: audioPCMBuffer.frameCapacity) {
             let converter = AVAudioConverter(from: audioFile.processingFormat, to: twoChannelsFormat)
             try? converter?.convert(to: twoChannnelBuffer, from: audioPCMBuffer)
             audioBuffer = BufferedAudio(audioBuffer: twoChannnelBuffer, framePosition: currentFramePosition, shouldFadeOut: false, shouldFadeIn: fadeInNextFrame)
         } else {
-            audioBuffer = BufferedAudio(audioBuffer: audioPCMBuffer!, framePosition: currentFramePosition, shouldFadeOut: false, shouldFadeIn: fadeInNextFrame)
+            audioBuffer = BufferedAudio(audioBuffer: audioPCMBuffer, framePosition: currentFramePosition, shouldFadeOut: false, shouldFadeIn: fadeInNextFrame)
         }
 
         var buffers = [BufferedAudio]()
         if trimSilence != .off {
-            guard let bufferListPointer = UnsafeMutableAudioBufferListPointer(audioPCMBuffer?.mutableAudioBufferList) else {
-                buffers.append(audioBuffer)
-                objc_sync_exit(lock)
-
-                return buffers
-            }
+            let bufferListPointer = UnsafeMutableAudioBufferListPointer(audioPCMBuffer.mutableAudioBufferList)
 
             let currPosition = currentFramePosition / Int64(audioFile.fileFormat.sampleRate)
             let totalDuration = cachedFrameCount / Int64(audioFile.fileFormat.sampleRate)
@@ -318,7 +324,7 @@ class AudioReadTask {
                     // pop all the ones we don't need after that
                     while buffersSavedDuringGap.canPop(), buffersSavedDuringGap.count() > (amountOfSilentFramesToReInsert - 1) {
                         _ = buffersSavedDuringGap.pop()
-                        let secondsSaved = Double((audioPCMBuffer?.frameLength)!) / audioFile.fileFormat.sampleRate
+                        let secondsSaved = Double(audioPCMBuffer.frameLength) / audioFile.fileFormat.sampleRate
                         StatsManager.shared.addTimeSavedDynamicSpeed(secondsSaved)
                     }
 

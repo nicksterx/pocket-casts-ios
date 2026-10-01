@@ -27,26 +27,16 @@ class NotificationsHelper: NSObject, UNUserNotificationCenterDelegate {
     }
 
     @objc func pushEnabled() -> Bool {
-        if FeatureFlag.newSettingsStorage.enabled {
-            SettingsStore.appSettings.notifications
-        } else {
-            UserDefaults.standard.bool(forKey: Constants.UserDefaults.pushEnabled)
-        }
+        UserDefaults.standard.bool(forKey: Constants.UserDefaults.pushEnabled)
     }
 
     func enablePush() {
         if pushEnabled() { return } // already enabled
 
-        if FeatureFlag.newSettingsStorage.enabled {
-            SettingsStore.appSettings.notifications = true
-        }
         UserDefaults.standard.set(true, forKey: Constants.UserDefaults.pushEnabled)
     }
 
     func disablePush() {
-        if FeatureFlag.newSettingsStorage.enabled {
-            SettingsStore.appSettings.notifications = false
-        }
         UserDefaults.standard.removeObject(forKey: Constants.UserDefaults.pushEnabled)
     }
 
@@ -59,7 +49,27 @@ class NotificationsHelper: NSObject, UNUserNotificationCenterDelegate {
         registerForPushNotifications()
     }
 
-    func registerForPushNotifications(completion: ((Bool) -> ())? = nil) {
+    /// Handles a user-initiated change to per-podcast push notifications: requests permission if needed, persists the change, notifies observers, and shows a confirmation toast. Callers are responsible for tracking their own analytics event.
+    func setNotificationsEnabled(_ enabled: Bool, for podcast: Podcast) {
+        registerForPushNotifications { granted in
+            guard granted || !enabled else {
+                Toast.show(L10n.notificationsPermissionsNeedsAction, actions: [.init(title: L10n.notificationsPermissionsOpenSettings, action: {
+                    Analytics.track(.notificationsPermissionsOpenSystemSettings)
+                    UIApplication.shared.openNotificationSettings()
+                })])
+                return
+            }
+            PodcastManager.shared.setNotificationsEnabled(podcast: podcast, enabled: enabled)
+            NotificationCenter.postOnMainThread(notification: Constants.Notifications.podcastUpdated, object: podcast.uuid)
+            var message = enabled ? L10n.notificationsOn : L10n.notificationsOff
+            if let title = podcast.title, enabled {
+                message = L10n.notificationsOnForPodcast(title)
+            }
+            Toast.show(message)
+        }
+    }
+
+    func registerForPushNotifications(completion: (@MainActor (Bool) -> ())? = nil) {
         let downloadAction = UNNotificationAction(identifier: downloadEpisodeActionId, title: L10n.download, options: [])
         let playNowAction = UNNotificationAction(identifier: playNowActionid, title: L10n.notificationsPlayNow, options: [])
         let addQueueFirstAction = UNNotificationAction(identifier: addToQueueFirstActionId, title: L10n.playNext, options: [])
@@ -129,7 +139,7 @@ class NotificationsHelper: NSObject, UNUserNotificationCenterDelegate {
 
     private func handleEpisodeNotification(response: UNNotificationResponse, completionHandler: @escaping () -> Void) {
 
-        guard let episodeUuid = response.notification.request.content.userInfo["eu"] as? String, episodeUuid.count > 0 else {
+        guard let episodeUuid = response.notification.request.content.userInfo["eu"] as? String, !episodeUuid.isEmpty else {
             completionHandler()
             return
         }
@@ -137,7 +147,7 @@ class NotificationsHelper: NSObject, UNUserNotificationCenterDelegate {
         if downloadEpisodeActionId == response.actionIdentifier {
             AnalyticsHelper.downloadFromNotification()
             findEpisode(episodeUuid: episodeUuid) { episode in
-                if let episode = episode {
+                if let episode {
                     DownloadManager.shared.addToQueue(episodeUuid: episode.uuid)
                 }
 
@@ -148,7 +158,7 @@ class NotificationsHelper: NSObject, UNUserNotificationCenterDelegate {
             AnalyticsHelper.addToUpNextFromNotification(playFirst: playFirst)
 
             findEpisode(episodeUuid: episodeUuid) { episode in
-                if let episode = episode {
+                if let episode {
                     PlaybackManager.shared.addToUpNext(episode: episode, ignoringQueueLimit: true, toTop: playFirst, userInitiated: true)
                 }
 
@@ -157,7 +167,7 @@ class NotificationsHelper: NSObject, UNUserNotificationCenterDelegate {
         } else if playNowActionid == response.actionIdentifier {
             AnalyticsHelper.playNowFromNotification()
             findEpisode(episodeUuid: episodeUuid) { episode in
-                if let episode = episode {
+                if let episode {
                     PlaybackManager.shared.load(episode: episode, autoPlay: true, overrideUpNext: false)
                 }
 
@@ -175,13 +185,13 @@ class NotificationsHelper: NSObject, UNUserNotificationCenterDelegate {
         } else {
             // none of the actions where 3D Touched, the user just wants to open this episode if there is one
             findEpisode(episodeUuid: episodeUuid) { [weak self] episode in
-                guard let self = self else { return }
+                guard let self else { return }
 
-                if let episode = episode as? Episode, let podcast = DataManager.sharedManager.findPodcast(uuid: episode.podcastUuid) {
+                if let episode = episode as? Episode, let podcast = DataManager.shared.findPodcast(uuid: episode.podcastUuid) {
                     self.appDelegate()?.openEpisode(episode.uuid, from: podcast)
-                } else if let podcastUuid = response.notification.request.content.userInfo["podcast_uuid"] as? String, let podcast = DataManager.sharedManager.findPodcast(uuid: podcastUuid) {
+                } else if let podcastUuid = response.notification.request.content.userInfo["podcast_uuid"] as? String, let podcast = DataManager.shared.findPodcast(uuid: podcastUuid) {
                     DispatchQueue.main.async {
-                        NavigationManager.sharedManager.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcast])
+                        NavigationManager.shared.navigateTo(NavigationManager.podcastPageKey, data: [NavigationManager.podcastKey: podcast])
                     }
                 }
 
@@ -196,11 +206,11 @@ class NotificationsHelper: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func findEpisode(episodeUuid: String, performing action: @escaping (BaseEpisode?) -> Void) {
-        if let existingEpisode = DataManager.sharedManager.findEpisode(uuid: episodeUuid) {
+        if let existingEpisode = DataManager.shared.findEpisode(uuid: episodeUuid) {
             action(existingEpisode)
         } else {
             RefreshManager.shared.refreshPodcasts(completion: { _ in
-                if let episode = DataManager.sharedManager.findEpisode(uuid: episodeUuid) {
+                if let episode = DataManager.shared.findEpisode(uuid: episodeUuid) {
                     DispatchQueue.main.async {
                         action(episode)
                     }

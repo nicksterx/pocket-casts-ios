@@ -1,8 +1,14 @@
+---
+name: create-pr
+description: Create a pull request using the repository template and current branch changes
+user-invocable: true
+---
+
 # Create Pull Request
 
 ## Steps
 
-1. **Verify the project compiles** — Build the project and confirm it succeeds with no errors. Do NOT proceed if the build fails; fix any issues first.
+1. **Verify the project compiles** — Build the project; if it fails, fix the errors before continuing.
 
 2. **Gather context** — Run `git diff trunk...HEAD` and `git log trunk..HEAD --oneline` to understand all changes included in the PR.
 

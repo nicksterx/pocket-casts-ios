@@ -1,3 +1,5 @@
+import Foundation
+
 public enum WatchConstants {
     public enum Keys {
         public static let messageVersion = "id"
@@ -9,6 +11,7 @@ public enum WatchConstants {
         public static let nowPlayingEpisode = "episode"
         public static let nowPlayingStatus = "status"
         public static let nowPlayingCurrentTime = "upto"
+        public static let nowPlayingPlayedUpToModified = "uptoModified"
         public static let nowPlayingDuration = "duration"
         public static let nowPlayingColor = "color"
         public static let nowPlayingUpNextCount = "upcount"
@@ -33,9 +36,6 @@ public enum WatchConstants {
         public static let podcastSettings = "podcastSettings"
         public static let podcastUuid = "uuid"
         public static let podcastCustomPosition = "podcastCustomPosition"
-        public static let podcastEpisodeGrouping = "episodeGrouping"
-        public static let podcastEpisodeSortOrder = "episodeSortOrder"
-        public static let podcastAutoArchiveEpisodeLimit = "autoArchiveEpisodeLimit"
         public static let podcastAutoArchivePlayedAfter = "podcastAutoArchivePlayedAfter"
         public static let podcastOverrideGlobalArchive = "podcastOverrideGlobalArchive"
 
@@ -93,6 +93,13 @@ public enum WatchConstants {
             public static let type = "minSyncUpdate"
         }
 
+        enum PlaybackProgressUpdate {
+            public static let type = "playbackProgressUpdate"
+            public static let episodeUuid = "uuid"
+            public static let playedUpTo = "playedUpTo"
+            public static let modifiedAt = "modifiedAt" // playedUpToModified (UTC millis)
+        }
+
         enum DataRequest {
             public static let type = "dataRequest"
         }
@@ -100,11 +107,6 @@ public enum WatchConstants {
         enum FilterRequest {
             public static let type = "filterRequest"
             public static let filterUuid = "uuid"
-        }
-
-        enum EpisodeRequest {
-            public static let type = "episodeRequest"
-            public static let episodeUuid = "uuid"
         }
 
         enum FilterResponse {

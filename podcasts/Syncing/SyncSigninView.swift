@@ -86,7 +86,7 @@ struct SyncSigninView: View {
                 .submitLabel(.next)
                 .focused($focusedField, equals: .email)
                 .onSubmit { focusedField = .password }
-                .onChange(of: model.email) { _ in model.textFieldChanged() }
+                .onChange(of: model.email) { model.textFieldChanged() }
         }
         .padding(9)
         .themedTextField(hasErrored: model.errorMessage != nil)
@@ -118,7 +118,7 @@ struct SyncSigninView: View {
                 .accessibilityLabel(model.showPassword ? L10n.signInHidePasswordLabel : L10n.signInShowPasswordLabel)
                 .tint(theme.primaryIcon03)
             }
-            .onChange(of: model.password) { _ in model.textFieldChanged() }
+            .onChange(of: model.password) { model.textFieldChanged() }
         }
         .padding(9)
         .themedTextField(hasErrored: model.errorMessage != nil)
@@ -241,6 +241,7 @@ final class SyncSigninViewModel: ObservableObject {
         // Button state reacts via @Published + computed isValid
     }
 
+    @MainActor
     func forgotPasswordTapped() {
         let vc = ForgotPasswordViewController()
         vc.delegate = self
@@ -291,7 +292,7 @@ final class SyncSigninViewModel: ObservableObject {
                 self.handleSuccessfulSignIn(username: username, password: password, userId: userId)
 
                 RefreshManager.shared.refreshPodcasts(forceEvenIfRefreshedRecently: true)
-                Settings.setPromotionFinishedAcknowledged(true)
+                Settings.promotionFinishedAcknowledged = true
                 Settings.setLoginDetailsUpdated()
 
                 NotificationCenter.postOnMainThread(notification: .userSignedIn)
@@ -311,9 +312,8 @@ final class SyncSigninViewModel: ObservableObject {
         ServerSettings.userId = userId
         ServerSettings.saveSyncingPassword(password)
 
-        if (FeatureFlag.onlyMarkPodcastsUnsyncedForNewUsers.enabled && ServerSettings.lastSyncTime == nil)
-            || !FeatureFlag.onlyMarkPodcastsUnsyncedForNewUsers.enabled {
-            DataManager.sharedManager.markAllPodcastsUnsynced()
+        if ServerSettings.lastSyncTime == nil {
+            DataManager.shared.markAllPodcastsUnsynced()
         }
 
         SyncManager.syncReason = .login

@@ -23,7 +23,7 @@ class BadgeSettingsViewController: PCViewController, UITableViewDelegate, UITabl
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        playlists = DataManager.sharedManager.allSmartPlaylists(includeDeleted: false)
+        playlists = DataManager.shared.allSmartPlaylists(includeDeleted: false)
 
         insetAdjuster.setupInsetAdjustmentsForMiniPlayer(scrollView: optionsTable)
 
@@ -47,7 +47,7 @@ class BadgeSettingsViewController: PCViewController, UITableViewDelegate, UITabl
 
         return SettingsTableHeader(
             frame: headerFrame,
-            title: FeatureFlag.playlistsRebranding.enabled ? L10n.settingsBadgeSmartPlaylistHeader : L10n.settingsBadgeFilterHeader
+            title: L10n.settingsBadgeSmartPlaylistHeader
         )
     }
 

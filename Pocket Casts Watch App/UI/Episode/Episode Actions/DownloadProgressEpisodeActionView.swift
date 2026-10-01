@@ -4,11 +4,11 @@ struct DownloadProgressEpisodeActionView: View {
     @Binding var downloadProgress: DownloadProgress?
 
     var body: some View {
-        EpisodeActionView(iconName: downloadIconForProgress(downloadProgress), title: EpisodeAction.pauseDownload.title)
+        EpisodeActionView(iconName: downloadIcon(for: downloadProgress), title: EpisodeAction.pauseDownload.title)
     }
 
-    private func downloadIconForProgress(_ progress: DownloadProgress?) -> String {
-        guard let progress = progress else {
+    private func downloadIcon(for progress: DownloadProgress?) -> String {
+        guard let progress else {
             return EpisodeAction.pauseDownload.iconName
         }
 

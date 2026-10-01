@@ -46,6 +46,11 @@ class RichExpandableLabel: WKWebView {
     }
 
     private func commonInit() {
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: RichExpandableLabel, _) in
+            view.reset()
+            view.setRichText(html: view.originalHTML)
+        }
+
         translatesAutoresizingMaskIntoConstraints = false
         let font = UIFont.preferredFont(forTextStyle: .body)
         let estimatedHeight = Self.estimateHeightFor(maxLines: maxLines, lineHeightMultiple: desiredLinedHeightMultiple, font: font)
@@ -87,16 +92,6 @@ class RichExpandableLabel: WKWebView {
         previousHTML = styledHTML
         self.loadHTMLString(styledHTML, baseURL: nil)
     }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-            super.traitCollectionDidChange(previousTraitCollection)
-
-            // Check if content size category specifically changed
-            if traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory {
-                reset()
-                setRichText(html: originalHTML)
-            }
-        }
 
     private func style(html: String) -> String {
         let  backgroundColor: UIColor = ThemeColor.primaryUi02()
@@ -148,8 +143,8 @@ class RichExpandableLabel: WKWebView {
         }
         </style>
         </head>
-        <body>
-        <div id="container">
+        <body dir="auto">
+        <div id="container" dir="auto">
         \(html)
         </div>
         </body>
@@ -197,7 +192,7 @@ class RichExpandableLabel: WKWebView {
 
     private func updateScrollSize() {
         evaluateJavaScript("document.body.scrollHeight", completionHandler: { [weak self] height, _ in
-            guard let self = self, let cgHeight = height as? CGFloat else { return }
+            guard let self, let cgHeight = height as? CGFloat else { return }
 
             contentHeight = CGFloat(cgHeight).rounded(.up)
             htmlReady = true
@@ -211,8 +206,8 @@ class RichExpandableLabel: WKWebView {
     }
 
     private func updateLinesRequired() {
-        evaluateJavaScript("countLines()", completionHandler: { [weak self] lines, error in
-            guard let self = self, let linesRequired = lines as? Double else { return }
+        evaluateJavaScript("countLines()", completionHandler: { [weak self] lines, _ in
+            guard let self, let linesRequired = lines as? Double else { return }
             collapsed = Int(linesRequired.rounded(.up)) > self.maxLines
         })
     }
@@ -225,7 +220,7 @@ class RichExpandableLabel: WKWebView {
 extension RichExpandableLabel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         evaluateJavaScript("document.readyState", completionHandler: { [weak self] complete, _ in
-            guard let self = self,
+            guard let self,
                   let result = complete as? String,
                   result == "complete" // ensure that the load of HTML is complete and not in another loading state
             else {

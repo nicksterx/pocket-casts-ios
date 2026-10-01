@@ -5,6 +5,8 @@ import PocketCastsUtils
 
 class ServerSyncManager: ServerSyncDelegate {
     static let shared = ServerSyncManager()
+    private static let networkDataUsageRetentionPeriod: TimeInterval = 30.days
+    private static let networkDataUsageCleanupInterval: TimeInterval = 24.hours
 
     // MARK: - Podcast functions
 
@@ -39,7 +41,7 @@ class ServerSyncManager: ServerSyncDelegate {
     // MARK: - Episode functions
 
     func episodeStarredChanged(episode: Episode) {
-        if PlaybackManager.shared.isNowPlayingEpisode(episodeUuid: episode.uuid) {
+        if PlaybackManager.shared.isCurrentEpisode(uuid: episode.uuid) {
             PlaybackManager.shared.nowPlayingStarredChanged()
         }
         NotificationCenter.postOnMainThread(notification: Constants.Notifications.episodeStarredChanged, object: episode.uuid)
@@ -73,6 +75,7 @@ class ServerSyncManager: ServerSyncDelegate {
     }
 
     func performActionsAfterSync() {
+        cleanupNetworkDataUsageIfNeeded()
         PodcastManager.shared.checkForExpiredPodcastsAndCleanup()
         PodcastManager.shared.checkForPendingAndAutoDownloads()
         #if !APPCLIP
@@ -83,10 +86,36 @@ class ServerSyncManager: ServerSyncDelegate {
         DispatchQueue.main.async {
             Analytics.shared.refreshRegistered()
             PlaybackManager.shared.effectsChangedExternally()
-            Theme.sharedTheme.toggleTheme()
-            #if !APPCLIP
+            #if !os(tvOS)
+            Theme.shared.toggleTheme()
+            #endif
+            #if !APPCLIP && !os(tvOS)
             NotificationsHelper.shared.register(checkToken: true)
             #endif
+        }
+    }
+
+    private func cleanupNetworkDataUsageIfNeeded() {
+        guard FeatureFlag.trackNetworkDataUsage.enabled else { return }
+
+        let defaults = UserDefaults.standard
+        let lastCleanupDate = defaults.object(forKey: Constants.UserDefaults.lastNetworkDataUsageCleanupDate) as? Date
+
+        guard DateUtil.hasEnoughTimePassed(since: lastCleanupDate, time: Self.networkDataUsageCleanupInterval) else {
+            return
+        }
+
+        let cleanupDate = Date()
+        defaults.set(cleanupDate, forKey: Constants.UserDefaults.lastNetworkDataUsageCleanupDate)
+
+        Task {
+            let didCleanup = await DataManager.shared.networkDataUsageManager.deleteRecords(
+                olderThan: Date(timeIntervalSinceNow: -Self.networkDataUsageRetentionPeriod)
+            )
+
+            if !didCleanup {
+                defaults.set(lastCleanupDate, forKey: Constants.UserDefaults.lastNetworkDataUsageCleanupDate)
+            }
         }
     }
 
@@ -116,19 +145,27 @@ class ServerSyncManager: ServerSyncDelegate {
     // MARK: - Settings
 
     func isPushEnabled() -> Bool {
-        #if APPCLIP
+        #if APPCLIP || os(tvOS)
         false
         #else
         NotificationsHelper.shared.pushEnabled()
         #endif
     }
 
+    func isNewEpisodeNotificationsEnabled() -> Bool {
+        #if APPCLIP || os(tvOS)
+        false
+        #else
+        NotificationsGroup.newEpisodes.isEnabled
+        #endif
+    }
+
     func defaultPodcastGrouping() -> Int32 {
-        Settings.defaultPodcastGrouping().rawValue
+        Settings.defaultPodcastGrouping.rawValue
     }
 
     func defaultShowArchived() -> Bool {
-        Settings.showArchivedDefault()
+        Settings.showArchivedDefault
     }
 
     func uniqueAppId() -> String {
@@ -147,8 +184,12 @@ class ServerSyncManager: ServerSyncDelegate {
         if Settings.autoDownloadEnabled() {
             if Settings.autoDownloadMobileDataAllowed() || NetworkUtils.shared.isConnectedToUnexpensiveConnection() {
                 for uuid in uuids {
-                    AnalyticsEpisodeHelper.shared.downloaded(episodeUUID: uuid)
                     DownloadManager.shared.addToQueue(episodeUuid: uuid)
+                }
+                DispatchQueue.main.async {
+                    for uuid in uuids {
+                        AnalyticsEpisodeHelper.shared.downloaded(episodeUUID: uuid)
+                    }
                 }
             }
         }

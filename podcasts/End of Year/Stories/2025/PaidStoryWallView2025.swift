@@ -32,8 +32,6 @@ struct PaidStoryWallView2025: StoryView {
     @Environment(\.pauseState) var pauseState: PauseState
     @EnvironmentObject var storyModel: StoriesModel
 
-    @StateObject private var model = PlusPricingInfoModel()
-
     @StateObject private var subscriptionModel =  SubscriptionModel()
     private let subscriptionTier: SubscriptionTier
 
@@ -83,7 +81,7 @@ struct PaidStoryWallView2025: StoryView {
                             return
                         }
                         Analytics.track(.endOfYearUpsellShown, properties: ["current_year": EndOfYear.currentYear.literalValue])
-                        NavigationManager.sharedManager.showUpsellView(from: storiesViewController, source: .endOfYear, flow: SyncManager.isUserLoggedIn() ? .endOfYearUpsell : .endOfYear)
+                        NavigationManager.shared.showUpsellView(from: storiesViewController, source: .endOfYear, flow: SyncManager.isUserLoggedIn() ? .endOfYearUpsell : .endOfYear)
                     } else {
                         Analytics.track(.endOfYearPlusContinued, properties: ["current_year": EndOfYear.currentYear.literalValue])
                         advanceToNextStory()
@@ -102,7 +100,7 @@ struct PaidStoryWallView2025: StoryView {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
         }
-        .onChange(of: subscriptionModel.subscriptionTier) { newValue in
+        .onChange(of: subscriptionModel.subscriptionTier) { _, newValue in
             if newValue != subscriptionTier, newValue != .none {
                 pauseState.play()
                 storyModel.next()
@@ -162,7 +160,7 @@ fileprivate struct CustomVideoPlayerView: UIViewControllerRepresentable {
         if !PlaybackManager.shared.isPlayingEpisode {
             do {
                 try AVAudioSession.sharedInstance().setActive(false)
-            } catch let error {
+            } catch {
                 FileLog.shared.addMessage("Playback Video Audio Session error: \(error)")
             }
         }

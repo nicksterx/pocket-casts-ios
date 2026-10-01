@@ -9,28 +9,48 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     var willAttachPlayer: (() -> Void)?
     var willDeattachPlayer: (() -> Void)?
 
+    private var controlsTintColor: UIColor { ThemeColor.contrast01(for: .extraDark) }
+
     @IBOutlet var routePickerView: PCRoutePickerView! {
         didSet {
-            routePickerView.tintColor = ThemeColor.contrast01(for: .extraDark)
+            routePickerView.tintColor = controlsTintColor
             routePickerView.activeTintColor = ThemeColor.primaryIcon01Active(for: .extraDark)
             routePickerView.backgroundColor = UIColor.clear
         }
     }
 
-    @IBOutlet var fillScreenBtn: UIButton!
+    @IBOutlet var closeBtn: UIButton! {
+        didSet {
+            closeBtn.tintColor = controlsTintColor
+        }
+    }
+
+    @IBOutlet var fillScreenBtn: UIButton! {
+        didSet {
+            fillScreenBtn.tintColor = controlsTintColor
+        }
+    }
+
+    @IBOutlet var exitFullScreenBtn: UIButton! {
+        didSet {
+            exitFullScreenBtn.tintColor = controlsTintColor
+            exitFullScreenBtn.accessibilityLabel = L10n.playerVideoExitFullScreen
+        }
+    }
 
     @IBOutlet var closeFileStackView: UIStackView!
     @IBOutlet var playPauseBtn: PlayPauseButton! {
         didSet {
             playPauseBtn.backgroundColor = UIColor.clear
             playPauseBtn.circleColor = UIColor.clear
-            playPauseBtn.playButtonColor = ThemeColor.contrast01(for: .extraDark)
+            playPauseBtn.playButtonColor = controlsTintColor
         }
     }
 
     @IBOutlet var skipForwardBtn: SkipButton! {
         didSet {
             skipForwardBtn.skipBack = false
+            skipForwardBtn.tintColor = controlsTintColor
             skipForwardBtn.longPressed = { [weak self] in
                 self?.skipForwardLongPressed()
             }
@@ -40,6 +60,7 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     @IBOutlet var skipBackBtn: SkipButton! {
         didSet {
             skipBackBtn.skipBack = true
+            skipBackBtn.tintColor = controlsTintColor
         }
     }
 
@@ -87,14 +108,24 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
         }
     }
 
-    @IBOutlet var pipButton: UIButton!
-
-    @IBOutlet var airplayButton: UIButton!
+    @IBOutlet var pipButton: UIButton! {
+        didSet {
+            pipButton.tintColor = controlsTintColor
+        }
+    }
 
     #if APPCLIP
-    @IBOutlet var castButton: UIButton!
+    @IBOutlet var castButton: UIButton! {
+        didSet {
+            castButton.tintColor = controlsTintColor
+        }
+    }
     #else
-    @IBOutlet var castButton: PCGoogleCastButton!
+    @IBOutlet var castButton: PCGoogleCastButton! {
+        didSet {
+            castButton.tintColor = controlsTintColor
+        }
+    }
     #endif
 
     private var pipController: AVPictureInPictureController?
@@ -141,7 +172,7 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
         super.viewDidAppear(animated)
 
         addUiNotificationObservers()
-        if PlaybackManager.shared.playing() {
+        if PlaybackManager.shared.isPlaying {
             startHideControlsTimer()
         }
     }
@@ -155,6 +186,7 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
 
+        stopObservingVideoSize()
         videoPlayerView.player = nil
         removeAllCustomObservers()
     }
@@ -170,13 +202,13 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     }
 
     @IBAction func skipBackTapped(_ sender: Any) {
-        if PlaybackManager.shared.playing() { startHideControlsTimer() }
+        if PlaybackManager.shared.isPlaying { startHideControlsTimer() }
 
         PlaybackManager.shared.skipBack()
     }
 
     @IBAction func playPauseTapped(_ sender: Any) {
-        let currentlyPlaying = PlaybackManager.shared.playing()
+        let currentlyPlaying = PlaybackManager.shared.isPlaying
         HapticsHelper.triggerPlayPauseHaptic()
         if currentlyPlaying {
             PlaybackManager.shared.pause()
@@ -188,14 +220,14 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     }
 
     @IBAction func skipForwardTapped(_ sender: Any) {
-        if PlaybackManager.shared.playing() { startHideControlsTimer() }
+        if PlaybackManager.shared.isPlaying { startHideControlsTimer() }
         PlaybackManager.shared.skipForward()
     }
 
     private func skipForwardLongPressed() {
-        guard let episode = PlaybackManager.shared.currentEpisode() else { return }
+        guard let episode = PlaybackManager.shared.currentEpisode else { return }
 
-        let options = OptionsPicker(title: nil, themeOverride: .dark, portraitOnly: false)
+        let options = OptionsPicker(title: nil, themeOverride: .dark)
 
         let markPlayedOption = OptionAction(label: L10n.markPlayedShort, icon: nil) {
             AnalyticsEpisodeHelper.shared.currentSource = .videoPlayerSkipForwardLongPress
@@ -205,19 +237,19 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
 
         if PlaybackManager.shared.queue.upNextCount() > 0 {
             let skipToNextAction = OptionAction(label: L10n.nextEpisode, icon: nil) {
-                let currentlyPlayingEpisode = PlaybackManager.shared.currentEpisode()
+                let currentlyPlayingEpisode = PlaybackManager.shared.currentEpisode
                 PlaybackManager.shared.removeIfPlayingOrQueued(episode: currentlyPlayingEpisode, fireNotification: true, userInitiated: true)
             }
             options.addAction(action: skipToNextAction)
         }
 
-        options.show(statusBarStyle: preferredStatusBarStyle)
+        options.present(from: self)
     }
 
     // MARK: - Picture In Picture
 
     @IBAction func pictureInPictureTapped(_ sender: Any) {
-        guard let pipController = pipController else { return }
+        guard let pipController else { return }
 
         if pipController.isPictureInPictureActive {
             pipController.stopPictureInPicture()
@@ -227,7 +259,7 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     }
 
     private func setupPictureInPicturePlayback() {
-        if let videoPlayerView = videoPlayerView, AVPictureInPictureController.isPictureInPictureSupported() {
+        if let videoPlayerView, AVPictureInPictureController.isPictureInPictureSupported() {
             pipController = AVPictureInPictureController(playerLayer: videoPlayerView.playerLayer)
             pipController?.delegate = self
             pipButton.isHidden = false
@@ -237,7 +269,7 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     }
 
     private func teardownPictureInPicturePlayback() {
-        if let pipController = pipController {
+        if let pipController {
             pipController.delegate = nil
         }
 
@@ -270,22 +302,18 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
         addCustomObserver(Constants.Notifications.googleCastStatusChanged, selector: #selector(update))
     }
 
-    private func removeUiNotificationObservers() {
-        removeAllCustomObservers()
-    }
-
     @objc private func playbackFinished() {
         dismiss(animated: true, completion: nil)
     }
 
     @objc private func progressUpdated() {
-        if timeSlider.isScrubbing() || PlaybackManager.shared.isSeeking() { return }
+        if timeSlider.isScrubbing() || PlaybackManager.shared.isSeeking { return }
 
         updateUpTo(upTo: PlaybackManager.shared.currentTime(), duration: PlaybackManager.shared.duration(), moveSlider: true)
     }
 
     @objc private func trackChanged() {
-        guard let currentEpisode = PlaybackManager.shared.currentEpisode(), currentEpisode.videoPodcast() else {
+        guard PlaybackManager.shared.currentEpisode != nil, PlaybackManager.shared.isCurrentEpisodeVideo() else {
             dismiss(animated: true, completion: nil)
             return
         }
@@ -315,7 +343,7 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     }
 
     private func updatePlayPauseButton() {
-        playPauseBtn.isPlaying = PlaybackManager.shared.playing()
+        playPauseBtn.isPlaying = PlaybackManager.shared.isPlaying
     }
 
     func updateUpTo(upTo: TimeInterval, duration: TimeInterval, moveSlider: Bool) {
@@ -331,6 +359,7 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     private func attachPlayer() {
         willAttachPlayer?()
         videoPlayerView.player = PlaybackManager.shared.internalPlayerForVideoPlayback()
+        observeVideoSize()
         setupPictureInPicturePlayback()
     }
 
@@ -351,7 +380,70 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     // MARK: - Orientation
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        .allButUpsideDown
+        isLandscapeVideoOnPhone ? .landscape : .allButUpsideDown
+    }
+
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        isLandscapeVideoOnPhone ? preferredLandscapeOrientation : super.preferredInterfaceOrientationForPresentation
+    }
+
+    private var isLandscapeVideoOnPhone: Bool {
+        isLandscapeVideo && UIDevice.current.userInterfaceIdiom == .phone
+    }
+
+    /// Asked for before we're presented, while the player is still attached to the video in the player.
+    private lazy var isLandscapeVideo = Self.isLandscape(currentVideoSize) ?? false
+
+    /// Matches the way the device is being held, if it's already being held in landscape.
+    /// `UIDeviceOrientation` and `UIInterfaceOrientation` name the two landscapes opposite ways.
+    private var preferredLandscapeOrientation: UIInterfaceOrientation {
+        UIDevice.current.orientation == .landscapeRight ? .landscapeLeft : .landscapeRight
+    }
+
+    private var currentVideoSize: CGSize? {
+        (videoPlayerView?.player ?? PlaybackManager.shared.internalPlayerForVideoPlayback())?.currentItem?.presentationSize
+    }
+
+    private var videoSizeObserver: NSKeyValueObservation?
+    private weak var observedItem: AVPlayerItem?
+
+    /// A stream's size isn't known until the item is ready, and `attachPlayer` runs again for every
+    /// track change, so watch each new item until it tells us how big it is.
+    private func observeVideoSize() {
+        let item = videoPlayerView.player?.currentItem
+
+        guard item !== observedItem else { return }
+
+        observedItem = item
+        videoSizeObserver = item?.observe(\.presentationSize, options: [.initial, .new]) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.updateSupportedOrientations()
+            }
+        }
+    }
+
+    private func stopObservingVideoSize() {
+        videoSizeObserver = nil
+        observedItem = nil
+    }
+
+    private func updateSupportedOrientations() {
+        guard let isLandscapeVideo = Self.isLandscape(currentVideoSize) else { return }
+
+        // We know this item's size now, `observedItem` keeps us from watching it again.
+        videoSizeObserver = nil
+
+        guard isLandscapeVideo != self.isLandscapeVideo else { return }
+
+        self.isLandscapeVideo = isLandscapeVideo
+        setNeedsUpdateOfSupportedInterfaceOrientations()
+        presentingViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+    }
+
+    private static func isLandscape(_ videoSize: CGSize?) -> Bool? {
+        guard let videoSize, videoSize.width > 0, videoSize.height > 0 else { return nil }
+
+        return videoSize.width > videoSize.height
     }
 
     // MARK: - Swipe to close
@@ -359,14 +451,25 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
     // The closeOverlay and controlOverlay are anchored to the safe area
     // when we move the view the overlays flicker
     // To prevent this, anchor to the view instead of the safe area
-    var initialTouchPoint = CGPoint(x: 0, y: 0)
+    var initialTouchPoint = CGPoint.zero
 
     private static let pullDownThreshold: CGFloat = 100
+
+    /// The zoom transition brings its own interactive dismissal, so we leave the swipe to it.
+    private var usesZoomTransition: Bool {
+        if #available(iOS 18.0, *) {
+            return preferredTransition != nil
+        }
+
+        return false
+    }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if timeSlider.isScrubbing() { return false }
 
         guard let recognizer = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+
+        if usesZoomTransition { return false }
 
         let velocity = recognizer.velocity(in: view)
         let vertical = abs(velocity.y) > abs(velocity.x)
@@ -399,7 +502,6 @@ class VideoViewController: SimpleNotificationsViewController, AVPictureInPicture
             } else {
                 UIView.animate(withDuration: 0.3, animations: {
                     self.view.frame = CGRect(x: 0, y: 0, width: self.view.frame.size.width, height: self.view.frame.size.height)
-
                 }, completion: { (_: Bool) in
                     self.view.frame = CGRect(x: 0, y: 0, width: self.view.frame.size.width, height: self.view.frame.size.height)
                     self.closeToSafeTopConstraint.isActive = true

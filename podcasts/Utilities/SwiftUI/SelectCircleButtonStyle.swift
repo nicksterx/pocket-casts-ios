@@ -5,7 +5,7 @@ struct SelectCircleButtonStyle: ButtonStyle {
 
     @Binding var selected: Bool
 
-    var stroke: StrokeStyle = StrokeStyle(lineWidth: 2)
+    var stroke = StrokeStyle(lineWidth: 2)
     var multiSelectButtonSize: CGFloat = 24
     var checkSize: CGFloat = 22
 
@@ -18,7 +18,7 @@ struct SelectCircleButtonStyle: ButtonStyle {
                 ZStack {
                     Circle().fill(theme.primaryIcon01)
 
-                    Image("discover_tick")
+                    Image(decorative: "discover_tick")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(height: checkSize)
@@ -28,7 +28,7 @@ struct SelectCircleButtonStyle: ButtonStyle {
                 .animation(.linear(duration: 0.1), value: selected)
             )
             .contentShape(Circle())
-            .onChange(of: configuration.isPressed) { pressed in
+            .onChange(of: configuration.isPressed) { _, pressed in
                 if pressed {
                     selected.toggle()
                 }
